@@ -1,0 +1,29 @@
+[Unit]
+Description=brainStorm threaded chat server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=brainstorm
+Group=brainstorm
+EnvironmentFile=/etc/brainstorm/brainstorm.env
+WorkingDirectory=/opt/brainstorm
+ExecStart=/usr/bin/node /opt/brainstorm/dist/src/server.js
+Restart=on-failure
+RestartSec=3
+UMask=0027
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=/var/lib/brainstorm
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryMax=512M
+
+[Install]
+WantedBy=multi-user.target

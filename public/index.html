@@ -1,0 +1,402 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#2e2c2a">
+  <title>brainStorm</title>
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/style.css">
+  <script src="/runs.js" defer></script>
+  <script src="/admin.js" defer></script>
+  <script src="/claims.js" defer></script>
+  <script src="/face.js" defer></script>
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <a class="skip" href="#body">작성란으로 건너뛰기</a>
+  <header class="top">
+    <button id="menu-btn" class="icon" aria-label="대화 목록 열기" aria-controls="sidebar" aria-expanded="false">☰</button>
+    <strong class="brand">brainStorm</strong>
+    <span id="conn" class="conn off" role="status" aria-live="polite" title="실시간 연결 상태">연결 안 됨</span>
+    <span class="spacer"></span>
+    <span id="me" class="muted small"></span>
+    <button id="logout-btn" hidden>로그아웃</button>
+  </header>
+  <!-- 화면 읽기 도구 알림(대화 전환·전송 상태) -->
+  <div id="sr" class="sr-only" role="status" aria-live="polite"></div>
+
+  <main id="login-view" hidden>
+    <form id="login-form" class="card narrow">
+      <h1>로그인</h1>
+      <label>패스프레이즈 <input id="login-pass" type="password" autocomplete="current-password" required></label>
+      <button type="submit" class="primary">들어가기</button>
+      <p id="login-err" class="err" role="alert"></p>
+    </form>
+  </main>
+
+  <main id="app-view" class="work" hidden>
+    <nav id="menu" aria-label="주요 메뉴">
+      <span class="menu-label">주요 메뉴</span>
+      <button type="button" class="menu-item" data-menu="convo">대화 작업</button>
+      <button type="button" class="menu-item" data-menu="runs">실행 상태</button>
+      <button type="button" class="menu-item" data-menu="sessions">세션 교체</button>
+      <button type="button" class="menu-item" data-menu="people">참여자</button>
+      <button type="button" class="menu-item" data-menu="claims">선점</button>
+      <button type="button" class="menu-item" data-menu="members">멤버 권한</button>
+      <button type="button" class="menu-item" data-menu="agents">에이전트 연결</button>
+      <button type="button" class="menu-item" data-menu="audit">감사 기록</button>
+    </nav>
+
+    <aside id="sidebar" aria-label="대화 목록">
+      <div class="side-head">
+        <h2>대화 목록</h2>
+        <button type="button" id="side-close" class="icon only-narrow" aria-label="대화 목록 닫기">×</button>
+      </div>
+      <input id="search" type="search" placeholder="검색" aria-label="대화 제목 검색" autocomplete="off">
+      <section class="side-sec">
+        <h3 class="sec">채팅방</h3>
+        <div id="room-list"></div>
+      </section>
+      <section class="side-sec">
+        <div class="sec-row">
+          <h3 class="sec">스레드</h3>
+          <span class="sec-tools">
+            <button type="button" id="tree-toggle-all" class="link small" title="분기 스레드를 모두 접거나 펼칩니다">모두 접기</button>
+            <select id="thread-filter" aria-label="스레드 필터">
+              <option value="open">진행 중</option>
+              <option value="all">보관 포함</option>
+              <option value="archived">보관</option>
+              <option value="hidden">숨김</option>
+              <option value="trash">휴지통</option>
+            </select>
+          </span>
+        </div>
+        <nav id="thread-list" aria-label="스레드"></nav>
+      </section>
+      <p class="keys muted small">단축키: Alt+1~9 수신 대상 켜고 끄기(칩 순서) · Alt+0 전체 · Enter·Ctrl+Enter 보내기 · Shift+Enter 줄바꿈</p>
+    </aside>
+
+    <section id="convo" aria-label="대화">
+      <div id="empty" class="muted pad">대화를 불러오는 중…</div>
+      <div id="thread" hidden>
+        <div class="convo-head">
+          <div class="title-row">
+            <span id="t-kind" class="pill"></span>
+            <h2 id="t-title" tabindex="-1"></h2>
+            <span class="spacer"></span>
+            <button type="button" id="t-face" class="small head-link" aria-pressed="false" hidden>대면 모드</button>
+            <button type="button" id="t-merge" class="small head-link" hidden title="이 하위 스레드의 글을 상위 대화에 묶음으로 옮겨 거기서 이어 간다">⤴ 상위로 합치기</button>
+            <button type="button" id="t-md" class="small head-link" aria-pressed="false" title="이 대화의 글을 마크다운 기호 그대로(원문) 보기">원문 보기</button>
+            <button type="button" id="t-copy" class="small head-link" title="이 대화의 메시지 전부를 마크다운으로 복사">대화 복사</button>
+            <a id="t-audit" class="small head-link" href="#audit" title="이 대화의 감사 기록">감사 기록</a>
+            <details id="t-menu" class="menu">
+              <summary class="small" title="이름 바꾸기 · 보관·숨김·삭제(아래 분기 스레드까지 같이 걸립니다)">정리</summary>
+              <div class="menu-pop" role="menu">
+                <button type="button" role="menuitem" id="st-rename">이름 바꾸기…</button>
+                <button type="button" role="menuitem" id="st-archive">보관(읽기 전용)</button>
+                <button type="button" role="menuitem" id="st-unarchive">보관 해제</button>
+                <button type="button" role="menuitem" id="st-hide">목록에서 숨기기</button>
+                <button type="button" role="menuitem" id="st-unhide">숨김 해제</button>
+                <button type="button" role="menuitem" id="st-trash" class="danger">휴지통으로</button>
+                <button type="button" role="menuitem" id="st-restore">휴지통에서 복구</button>
+                <button type="button" role="menuitem" id="st-purge" class="danger">영구 삭제…</button>
+              </div>
+            </details>
+            <button type="button" id="aux-btn" aria-controls="aux" aria-expanded="false">보조 패널 열기</button>
+          </div>
+          <div id="t-alert" class="summary small" hidden></div>
+          <p id="t-state-note" class="note small" hidden></p>
+        </div>
+        <div id="banner" class="banner" role="status" aria-live="polite" hidden></div>
+        <div id="wait-banner" class="banner warn" hidden></div>
+        <details id="context-box" hidden>
+          <summary>분기 때 가져온 맥락 <span id="context-count" class="muted"></span></summary>
+          <div id="context"></div>
+        </details>
+        <div id="context-last" class="context-last" hidden></div>
+        <div id="messages" tabindex="-1" role="log" aria-label="메시지 목록" aria-live="polite"></div>
+        <div id="face" class="face" data-tab="doc" hidden>
+          <div id="face-tabs" class="face-tabs" role="tablist" aria-label="대면 보기">
+            <button type="button" role="tab" id="face-tab-doc" data-tab="doc">합의문</button>
+            <button type="button" role="tab" id="face-tab-left" data-tab="left">초안 쪽</button>
+            <button type="button" role="tab" id="face-tab-right" data-tab="right">검토 쪽</button>
+          </div>
+          <section id="face-left" class="face-col face-side" aria-labelledby="face-left-h">
+            <h3 id="face-left-h">초안 쪽</h3>
+            <div id="face-left-list" role="log" aria-live="polite"></div>
+          </section>
+          <section id="face-center" class="face-col face-mid" aria-label="합의문">
+            <div id="face-orders"></div>
+            <div class="face-doc-box">
+              <div id="face-doc-h" class="face-doc-h">합의문</div>
+              <div id="face-doc"></div>
+            </div>
+            <div id="face-cards"></div>
+          </section>
+          <section id="face-right" class="face-col face-side" aria-labelledby="face-right-h">
+            <h3 id="face-right-h">검토 쪽</h3>
+            <div id="face-right-list" role="log" aria-live="polite"></div>
+          </section>
+        </div>
+        <div id="pending" aria-live="polite"></div>
+        <div id="empty-thread" class="empty-thread" hidden>
+          <p><b>아직 메시지가 없습니다.</b></p>
+          <p class="muted small">이 스레드의 첫 메시지를 써서 대화를 시작하세요. 분기 때 가져온 맥락은 위 «분기 때 가져온 맥락»에 있습니다.</p>
+          <button type="button" id="first-msg-btn" class="primary">첫 메시지 작성</button>
+        </div>
+
+        <form id="composer" class="composer">
+          <div class="target-row">
+            <span class="muted small">현재 대화 대상</span>
+            <span id="c-target" class="c-target"></span>
+          </div>
+          <div id="reply-info" class="muted small" hidden></div>
+          <div id="recipients" class="chips" role="group" aria-label="수신 대상"></div>
+          <label class="sr-only" for="body">메시지 입력</label>
+          <div id="att-list" class="att-list" hidden></div>
+          <textarea id="body" rows="3" placeholder="메시지 입력 (Enter 전송 · Shift+Enter 줄바꿈) — 본문 속 @이름은 호출이 아닙니다. 받는 쪽은 위 수신 대상에서 고릅니다" maxlength="32000"></textarea>
+          <div class="row wrap composer-actions">
+            <details id="more" class="more">
+              <summary title="출처·호출 예산">⋯ <span id="more-sum"></span></summary>
+              <div class="more-body">
+                <label class="small">출처
+                  <select id="source-kind">
+                    <option value="instruction">지시</option>
+                    <option value="quote">인용</option>
+                    <option value="observation">관찰</option>
+                    <option value="proposal">제안</option>
+                  </select>
+                </label>
+                <label class="small">호출 예산 <input id="budget" type="number" min="0" max="10" value="3" class="num"></label>
+              </div>
+            </details>
+            <button type="button" id="attach-btn" title="이미지·문서 첨부 — 끌어다 놓거나 붙여넣어도 됩니다 (파일당 20MB · 5개)">📎 첨부</button>
+            <input id="file" type="file" multiple hidden>
+            <span class="spacer"></span>
+            <button type="button" id="fork-btn">스레드 생성</button>
+            <button type="submit" id="send-btn" class="primary">전송</button>
+          </div>
+          <div id="send-hint" class="muted small" hidden>보조 패널을 닫으면 전송할 수 있습니다. 작성 중인 내용은 그대로 남습니다.</div>
+        </form>
+      </div>
+    </section>
+
+    <!-- 실행 화면(기획 대조 2단계): 실행 상태 목록 n43 · 실행 상세 n46 · 취소 결과 n50 — runs.js -->
+    <section id="runs-page" class="page-sec" aria-label="실행 상태" hidden>
+      <div id="rp-list" hidden>
+        <div class="page-head">
+          <h2 id="rp-h" tabindex="-1">실행 상태</h2>
+          <span class="spacer"></span>
+          <span id="rp-total" class="muted small" aria-live="polite"></span>
+        </div>
+        <div class="filters" role="group" aria-label="실행 필터">
+          <label class="small">상태
+            <select id="rf-state">
+              <option value="">전체</option>
+              <option value="waiting">전달 대기</option>
+              <option value="queued">대기 중</option>
+              <option value="running">실행 중</option>
+              <option value="cancel_requested">중단 요청됨</option>
+              <option value="succeeded">완료</option>
+              <option value="failed">실행 실패</option>
+              <option value="cancelled">취소됨</option>
+              <option value="unknown">상태 미확인</option>
+            </select>
+          </label>
+          <label class="small">에이전트 <select id="rf-agent"></select></label>
+          <label class="small">대화 <select id="rf-thread"></select></label>
+          <label class="small">시작 시각
+            <select id="rf-since">
+              <option value="3600000">최근 1시간</option>
+              <option value="86400000">최근 24시간</option>
+              <option value="604800000">최근 7일</option>
+              <option value="">전체</option>
+            </select>
+          </label>
+        </div>
+        <p class="muted small">진행 중인 실행과 전달 대기는 기간과 상관없이 보입니다. 실패·취소·상태 미확인은 강조합니다.</p>
+        <div id="rp-table"></div>
+      </div>
+      <div id="rp-detail" hidden></div>
+      <div id="rp-result" hidden></div>
+    </section>
+
+    <!-- 기획 대조 3단계: 감사 기록 n76 · 에이전트 연결(기획서 2.1 재해석) · 멤버 권한 — admin.js -->
+    <section id="audit-page" class="page-sec" aria-label="감사 기록" hidden>
+      <div class="page-head">
+        <h2 id="au-h" tabindex="-1">감사 기록</h2>
+        <span class="muted small">전체 이벤트 로그</span>
+        <span class="spacer"></span>
+        <span id="au-total" class="muted small" aria-live="polite"></span>
+        <button type="button" id="au-reload">새로 고침</button>
+      </div>
+      <form id="au-filters" class="filters" role="search" aria-label="감사 기록 필터">
+        <input id="af-q" type="search" placeholder="이벤트·수행자·대상 검색" aria-label="이벤트·수행자·대상 검색" autocomplete="off">
+        <label class="small">이벤트 유형 <select id="af-action"></select></label>
+        <label class="small">수행자 <select id="af-actor"></select></label>
+        <label class="small">결과 상태
+          <select id="af-result">
+            <option value="">전체</option>
+            <option value="ok">성공</option>
+            <option value="requested">요청됨</option>
+            <option value="noop">변화 없음</option>
+            <option value="denied">거부</option>
+            <option value="failed">실패</option>
+          </select>
+        </label>
+        <label class="small">기간
+          <select id="af-since">
+            <option value="today">오늘</option>
+            <option value="86400000">최근 24시간</option>
+            <option value="604800000">최근 7일</option>
+            <option value="2592000000">최근 30일</option>
+            <option value="">전체</option>
+          </select>
+        </label>
+        <span id="af-chips" class="chips"></span>
+      </form>
+      <p class="muted small">감사 기록에는 메시지 본문·토큰·패스프레이즈가 없습니다. 같은 수행자의 같은 거부는 1분 안에 한 줄로 묶어 횟수만 셉니다. 이 화면을 연 것도 기록됩니다.</p>
+      <div id="au-table"></div>
+      <nav id="au-pages" class="pager" aria-label="쪽"></nav>
+    </section>
+
+    <section id="agents-page" class="page-sec" aria-label="에이전트 연결" hidden>
+      <div class="page-head">
+        <h2 id="ag-h" tabindex="-1">에이전트 연결</h2>
+        <span class="spacer"></span>
+        <span id="ag-checked" class="muted small" aria-live="polite"></span>
+        <label class="small"><input type="checkbox" id="ag-hide-revoked" /> 폐기된 에이전트 숨기기</label>
+        <button type="button" id="ag-reload">새로 고침</button>
+      </div>
+      <div class="note-box small">
+        <p><b>토큰 발급은 이 화면에 없습니다.</b> 마스터는 패스프레이즈로 로그인하고, 에이전트 토큰은 서버 안 관리 CLI로 발급해 600 파일로 바로 넘깁니다 — 토큰이 브라우저·클립보드를 거치지 않습니다. 이 화면은 연결 상태 확인과 폐기만 합니다.</p>
+        <pre class="cmd">(umask 077; brainstorm-admin token create --participant &lt;id&gt; --label &lt;메모&gt; &gt; /etc/brainstorm/agents/&lt;id&gt;.token)</pre>
+        <p class="muted">서버가 아는 신호는 «인증에 성공한 마지막 시각»과 «서버가 거절한 연결»뿐입니다. 어댑터 쪽 실패(모델 서버 꺼짐 등)는 실행 상태에서 «실행 실패»로 보입니다.</p>
+      </div>
+      <div id="ag-list" class="ag-list"></div>
+    </section>
+
+    <section id="members-page" class="page-sec" aria-label="멤버 권한" hidden>
+      <div class="page-head">
+        <h2 id="mb-h" tabindex="-1">멤버 권한</h2>
+        <span class="spacer"></span>
+        <label class="small">대화 <select id="mb-thread"></select></label>
+      </div>
+      <p class="muted small">대화마다 에이전트의 읽기·게시 권한을 정합니다. 바꾸면 바로 적용되고 감사 기록에 남습니다. 에이전트는 호출 권한이 없습니다(에이전트 간 자동 호출 꺼짐). 읽기를 끄면 그 에이전트 앞 전달은 거둬지고, 게시는 읽기가 있어야 켤 수 있습니다.</p>
+      <div id="mb-table"></div>
+      <p id="mb-status" class="small" role="status" aria-live="polite"></p>
+    </section>
+
+    <aside id="aux" aria-label="보조 패널" hidden>
+      <div class="aux-head">
+        <h2>보조 패널</h2>
+        <span id="aux-ctx" class="muted small"></span>
+        <span class="spacer"></span>
+        <button type="button" id="aux-close" class="icon" aria-label="보조 패널 닫기">×</button>
+      </div>
+      <!-- 대화 정보(분기·전송 대상·현재 대화·실행·세대)는 늘 볼 것이 아니라 보조 패널로(마스터 #325) -->
+      <div id="aux-info" class="aux-info">
+        <div id="t-path" class="muted small"></div>
+        <div id="t-summary" class="summary small"></div>
+      </div>
+      <div class="tabs" role="tablist" aria-label="보조 패널">
+        <button type="button" role="tab" id="tabbtn-runs" data-tab="runs" aria-controls="tab-runs">실행</button>
+        <button type="button" role="tab" id="tabbtn-sessions" data-tab="sessions" aria-controls="tab-sessions">세션</button>
+        <button type="button" role="tab" id="tabbtn-people" data-tab="people" aria-controls="tab-people">참여자</button>
+        <button type="button" role="tab" id="tabbtn-claims" data-tab="claims" aria-controls="tab-claims">선점</button>
+      </div>
+      <div id="tab-runs" role="tabpanel" aria-labelledby="tabbtn-runs" class="tabpanel">
+        <div class="sec-row"><h3>에이전트 실행 상태 <span id="runs-count" class="muted small"></span></h3><a id="runs-all" href="#runs" class="small">실행 목록 보기</a></div>
+        <div class="controls">
+          <button type="button" id="btn-stop-new" title="이 대화에 새 에이전트 호출을 만들지 않습니다. 도는 실행은 둡니다">새 호출 금지</button>
+          <button type="button" id="btn-resume" hidden>호출 재개</button>
+          <button type="button" id="btn-cancel-current" class="danger" title="대기·실행 중인 실행을 지금 취소합니다 (단축키 Esc)">현재 실행 취소</button>
+        </div>
+        <p id="paused-note" class="note small" hidden>이 대화는 «새 호출 금지» 중입니다 — 메시지는 저장되지만 에이전트를 부르지 않습니다.</p>
+        <ul id="runs" class="runs"></ul>
+        <h3 class="mt">보류된 요청 <span id="holds-count" class="muted small"></span></h3>
+        <ul id="holds" class="runs"></ul>
+        <h3 class="mt">전달 대기</h3>
+        <ul id="deliveries" class="runs"></ul>
+      </div>
+      <div id="tab-sessions" role="tabpanel" aria-labelledby="tabbtn-sessions" class="tabpanel" hidden>
+        <h3>활성 세션 세대</h3>
+        <div id="sessions"></div>
+      </div>
+      <div id="tab-people" role="tabpanel" aria-labelledby="tabbtn-people" class="tabpanel" hidden>
+        <h3>연결 상태</h3>
+        <div id="sync-info" class="small"></div>
+        <div class="sec-row mt"><h3>대화 참여자</h3><span class="small"><a id="people-perm" href="#members">권한 편집</a> · <a href="#agents">연결 상태</a></span></div>
+        <ul id="people" class="people"></ul>
+      </div>
+      <!-- 선점 보기 1안(마스터 #345): 위임 대장의 선점을 리듬게임 레인으로 — claims.js -->
+      <div id="tab-claims" role="tabpanel" aria-labelledby="tabbtn-claims" class="tabpanel" hidden>
+        <div class="sec-row"><h3>선점 레인</h3><span class="muted small">흰 블록 = 비어 있음 · 색 = 그 백수가 작업 중 · 위에 쌓인 것 = 대기</span></div>
+        <div id="claims-lanes"></div>
+        <div id="claims-detail" class="cl-detail"></div>
+      </div>
+    </aside>
+    <div id="backdrop" hidden></div>
+  </main>
+
+  <!-- 스레드 생성 2단계 -->
+  <div id="fork-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="fork-h" hidden>
+    <div class="modal-card wide">
+      <div class="modal-head">
+        <span id="fork-stepno" class="pill"></span>
+        <h2 id="fork-h">스레드 생성</h2>
+        <span class="spacer"></span>
+        <button type="button" class="icon" id="fork-x" aria-label="닫기">×</button>
+      </div>
+      <div id="fork-step1">
+        <h3>기본 정보</h3>
+        <label class="block">스레드 제목 <input id="fork-title" maxlength="200" placeholder="스레드 제목"></label>
+        <h3 class="mt">분기 시점 메시지</h3>
+        <p class="muted small">새 스레드가 시작될 메시지를 선택하세요. <span id="fork-parent"></span></p>
+        <div id="fork-points" class="pick-list" role="radiogroup" aria-label="분기 시점 메시지"></div>
+        <div class="modal-actions">
+          <button type="button" id="fork-cancel">취소</button>
+          <button type="button" id="fork-next" class="primary">다음 단계로</button>
+        </div>
+      </div>
+      <div id="fork-step2" hidden>
+        <h3>스레드 설정 요약</h3>
+        <dl id="fork-summary" class="kv small"></dl>
+        <h3 class="mt">포함될 메시지 범위</h3>
+        <p id="fork-count" class="count" aria-live="polite"></p>
+        <div class="presets" role="radiogroup" aria-label="범위">
+          <label><input type="radio" name="fork-preset" value="upto" checked> 분기 시점까지 전부</label>
+          <label><input type="radio" name="fork-preset" value="recent"> 최근 <input id="fork-recent-n" type="number" min="1" max="500" value="10" class="num" aria-label="최근 메시지 수">개</label>
+          <label><input type="radio" name="fork-preset" value="pick"> 직접 선택</label>
+        </div>
+        <p class="muted small">분기 시점 메시지는 항상 포함됩니다. 분기 시점 뒤의 메시지는 가져올 수 없습니다.</p>
+        <div id="fork-include" class="pick-list"></div>
+        <div id="fork-error" class="alert" role="alert" hidden></div>
+        <div class="modal-actions">
+          <button type="button" id="fork-back">1단계로 돌아가기</button>
+          <button type="button" id="fork-go" class="primary">스레드 생성</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 확인 상자 (실행 취소·세션 교체 등) -->
+  <div id="confirm" class="modal" role="alertdialog" aria-modal="true" aria-labelledby="confirm-h" aria-describedby="confirm-text" hidden>
+    <div class="modal-card">
+      <div class="modal-head">
+        <h2 id="confirm-h"></h2>
+        <span class="spacer"></span>
+        <button type="button" class="icon" id="confirm-x" aria-label="닫기">×</button>
+      </div>
+      <p id="confirm-text"></p>
+      <div id="confirm-extra"></div>
+      <div class="modal-actions">
+        <button type="button" id="confirm-no">닫기</button>
+        <button type="button" id="confirm-ok" class="primary"></button>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

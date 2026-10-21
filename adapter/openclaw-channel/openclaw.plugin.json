@@ -1,0 +1,34 @@
+{
+  "id": "brainstorm",
+  "name": "brainStorm",
+  "description": "brainStorm 자체 대화 채널 어댑터 — 전달을 받아 에이전트 턴 하나를 돌리고 답을 올린다",
+  "version": "0.2.0",
+  "categories": ["channels"],
+  "channels": ["brainstorm"],
+  "activation": { "onStartup": true },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  },
+  "channelConfigs": {
+    "brainstorm": {
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "enabled": { "type": "boolean" },
+          "url": { "type": "string", "pattern": "^https?://" },
+          "tokenFile": { "type": "string" },
+          "agentId": { "type": "string", "pattern": "^[a-z0-9_-]{1,64}$" },
+          "worker": { "type": "string", "maxLength": 100 },
+          "pollMs": { "type": "integer", "minimum": 500, "maximum": 60000 },
+          "turnTimeoutMs": { "type": "integer", "minimum": 10000, "maximum": 3600000 }
+        }
+      },
+      "uiHints": {
+        "tokenFile": { "label": "토큰 파일 경로 (chmod 600)" }
+      }
+    }
+  }
+}

@@ -1,0 +1,18 @@
+#!/bin/sh
+# 사용: brainstorm-restore /var/lib/brainstorm/backups/brainstorm-YYYYMMDD-HHMMSS.tar.gz
+# 서비스를 멈추고 → 복원(지금 DB는 pre-restore-<시각>/ 으로 치움) → 다시 켠다.
+# 복원된 DB의 대기 전달은 cancelled, 진행 중 run 은 unknown 이 된다 — 자동 재실행 없음.
+set -eu
+[ "$(id -u)" = 0 ] || { echo "root 로 실행" >&2; exit 1; }
+[ $# -eq 1 ] || { echo "사용: $0 <tarball>" >&2; exit 2; }
+TAR=$(readlink -f "$1")
+[ -r "$TAR" ] || { echo "없음: $TAR" >&2; exit 2; }
+# brainstorm 계정이 읽을 수 있는 곳으로
+STAGE=/var/lib/brainstorm/restore-stage.tar.gz
+install -o brainstorm -g brainstorm -m 640 "$TAR" "$STAGE"
+systemctl stop brainstorm.service
+trap 'rm -f "$STAGE"' EXIT
+/usr/local/bin/brainstorm-admin restore "$STAGE"
+chown -R brainstorm:brainstorm /var/lib/brainstorm
+systemctl start brainstorm.service
+echo "복원 끝. 웹 세션은 무효화됐다 — 다시 로그인."

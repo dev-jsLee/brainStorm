@@ -1,0 +1,9 @@
+#!/bin/sh
+# brainStorm 관리 CLI 래퍼. root 로 부르면 brainstorm 계정으로 내려가서 돈다.
+set -e
+umask 027
+set -a; . /etc/brainstorm/brainstorm.env; set +a
+if [ "$(id -u)" = 0 ]; then
+  exec runuser -u brainstorm -- /usr/bin/node /opt/brainstorm/dist/src/cli.js "$@"
+fi
+exec /usr/bin/node /opt/brainstorm/dist/src/cli.js "$@"

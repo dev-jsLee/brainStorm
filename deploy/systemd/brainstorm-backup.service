@@ -1,0 +1,15 @@
+[Unit]
+Description=brainStorm backup (DB 스냅숏 + 첨부 → tar.gz)
+
+[Service]
+Type=oneshot
+User=brainstorm
+Group=brainstorm
+EnvironmentFile=/etc/brainstorm/brainstorm.env
+UMask=0027
+ExecStart=/usr/bin/node /opt/brainstorm/dist/src/cli.js backup
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=/var/lib/brainstorm
+ProtectHome=yes
+PrivateTmp=yes

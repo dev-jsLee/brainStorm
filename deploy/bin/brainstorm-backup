@@ -1,0 +1,3 @@
+#!/bin/sh
+# 지금 바로 백업 하나. 결과 경로를 출력한다.
+exec /usr/local/bin/brainstorm-admin backup "$@"

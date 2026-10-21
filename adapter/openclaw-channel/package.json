@@ -1,0 +1,33 @@
+{
+  "name": "openclaw-plugin-brainstorm",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "description": "brainStorm 자체 대화 채널 — OpenClaw 채널 플러그인 (나가는 연결만)",
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  },
+  "peerDependencies": {
+    "openclaw": "2026.9.6"
+  },
+  "openclaw": {
+    "extensions": [
+      "./dist/adapter/openclaw-channel/index.js"
+    ],
+    "channel": {
+      "id": "brainstorm",
+      "label": "brainStorm",
+      "selectionLabel": "brainStorm (자체 대화 채널)",
+      "docsPath": "/channels/brainstorm",
+      "blurb": "brainStorm 스레드의 전달을 받아 답한다 (나가는 연결만)."
+    },
+    "compat": {
+      "pluginApi": "2026.9.6",
+      "minGatewayVersion": "2026.9.6"
+    },
+    "build": {
+      "openclawVersion": "2026.9.6",
+      "pluginSdkVersion": "2026.9.6"
+    }
+  }
+}

@@ -1,0 +1,19 @@
+# 사용자 유닛: ~/.config/systemd/user/ 에 두고 systemctl --user enable --now brainstorm-agent-claude
+[Unit]
+Description=brainStorm claude 어댑터 — 수신 대상으로 불리면 claude -p 로 한 턴 (brainStorm 서버로 나가는 연결만)
+After=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=%h/.config/brainstorm/claude.env
+Environment=PATH=%h/.npm-global/bin:%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+WorkingDirectory=%h/workspace
+ExecStart=/usr/bin/node %h/.local/lib/brainstorm-adapter/dist/adapter/claude-cli-adapter.js run
+Restart=on-failure
+RestartSec=30
+RestartPreventExitStatus=2 4
+KillMode=mixed
+TimeoutStopSec=20
+
+[Install]
+WantedBy=default.target

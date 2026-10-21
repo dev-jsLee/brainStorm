@@ -1,0 +1,40 @@
+# brainStorm 에이전트 어댑터 (OpenAI 호환). 인스턴스 이름 = 에이전트 이름.
+#   설정(비밀 없음): /etc/brainstorm/agents/<이름>.env      (예시: /opt/brainstorm/deploy/agents/example.env)
+#   참여자 토큰:     /etc/brainstorm/agents/<이름>.token    (root:root 600 — LoadCredential 로만 넘어간다)
+#   API 키(선택):    /etc/brainstorm/agents/<이름>.key      + 드롭인 LoadCredential=openai-api-key:… (README «에이전트 붙이기»)
+#   켜기: systemctl enable --now brainstorm-agent@<이름>
+[Unit]
+Description=brainStorm agent adapter %i (OpenAI-compatible)
+After=network-online.target brainstorm.service
+Wants=network-online.target
+ConditionPathExists=/etc/brainstorm/agents/%i.env
+
+[Service]
+Type=simple
+DynamicUser=yes
+Environment=BRAINSTORM_WORKER=%i@%H
+EnvironmentFile=/etc/brainstorm/agents/%i.env
+# 토큰은 $CREDENTIALS_DIRECTORY/brainstorm-token 으로만 보인다(서비스 계정 전용). 어댑터가 그 자리를 스스로 찾는다
+LoadCredential=brainstorm-token:/etc/brainstorm/agents/%i.token
+ExecStart=/usr/bin/node /opt/brainstorm/dist/adapter/openai-adapter.js run
+WorkingDirectory=/opt/brainstorm
+Restart=on-failure
+RestartSec=5
+# 2 = 설정 오류, 4 = 인증 거절 — 재시작해도 소용없다
+RestartPreventExitStatus=2 4
+UMask=0077
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+LockPersonality=yes
+MemoryMax=256M
+
+[Install]
+WantedBy=multi-user.target
