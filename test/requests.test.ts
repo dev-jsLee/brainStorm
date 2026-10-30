@@ -381,11 +381,31 @@ describe('요청 창구 API', () => {
     assert.equal(s.setRequestPair(cli, 'alpha', 'gamma', true).changed, true);
     assert.equal(s.setRequestPair(cli, 'alpha', 'gamma', true).changed, false);
     assert.equal(s.setRequestPair(cli, 'alpha', 'gamma', false).changed, true);
-    assert.throws(() => s.setRequestPair(cli, 'alpha', 'alpha', true));
+    assert.throws(() => s.setRequestPair(cli, 'alpha', 'Bad Id', true), /참여자 id/);
     const rows = db().prepare("SELECT actor_id, result FROM audit_log WHERE action LIKE 'request_pair.%' AND target_id = 'alpha>gamma' ORDER BY id").all() as any[];
     assert.deepEqual(rows.map((x) => `${x.actor_id}:${x.result}`), ['cli:root:ok', 'cli:root:noop', 'cli:root:ok']);
     const agentPr: Principal = { participant: s.getParticipant('alpha')!, via: 'token', scopes: ['adapter'] };
     assert.throws(() => s.setRequestPair(agentPr, 'alpha', 'gamma', true), /master_only/);
+  });
+  test('자기 짝(bs-job 깨우기): 없으면 자기에게 낸 요청 403 · gamma→gamma 를 더하면 배달되고 자기가 그 요청으로 claim', async () => {
+    const s = ctx.app.store;
+    const cli: Principal = { participant: s.getMaster()!, via: 'cookie', scopes: ['admin'], actor: CLI_ACTOR };
+    const th = await room('자기 요청');
+    await post(ctx, th, '긴 일 해', { recipients: ['gamma'] });
+    await turn('gamma', 'bs-job 으로 띄웠음');
+    const body = { body: '[bs-job 끝] 시험 · 종료 코드 0', source_kind: 'request', recipients: ['gamma'] };
+    assert.equal((await A('gamma', `/api/threads/${th}/messages`, { ...body, client_key: 'self-1' })).status, 403);
+    s.setRequestPair(cli, 'gamma', 'gamma', true);
+    try {
+      const r = await A('gamma', `/api/threads/${th}/messages`, { ...body, client_key: 'self-2' });
+      assert.ok(r.status < 300, JSON.stringify(r.json));
+      const c = await claimStart('gamma');
+      assert.equal(c.trigger.seq, r.json.message.seq);
+      assert.equal(c.trigger.source_kind, 'request');
+      await finish('gamma', c, '결과 확인함 — 마무리 보고');
+    } finally {
+      s.setRequestPair(cli, 'gamma', 'gamma', false);
+    }
   });
 });
 

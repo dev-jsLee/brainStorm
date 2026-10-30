@@ -30,6 +30,7 @@ const S = {
   everConnected: false,
   lastSync: null,
   auxOpen: false,
+  live: new Map(), // 대화 id → 실행 중(대기·실행) 에이전트 이름들 — 목록의 깜빡이는 점(디자인 #782)
   tab: 'runs',
   fork: null,
   pendingCompose: null,
@@ -208,67 +209,74 @@ function store(key, val) {
   } catch {}
   return null;
 }
-const fmtTime = (t) => (t ? new Date(t).toLocaleString('ko-KR', { hour12: false }) : '');
-const fmtHm = (t) => (t ? new Date(t).toLocaleTimeString('ko-KR', { hour12: false, hour: '2-digit', minute: '2-digit' }) : '');
-function rel(t) {
-  if (!t) return '';
-  const d = Date.now() - t;
-  if (d < 60_000) return '방금';
-  if (d < 3_600_000) return `${Math.floor(d / 60_000)}분 전`;
-  if (d < 86_400_000) return `${Math.floor(d / 3_600_000)}시간 전`;
-  if (d < 2 * 86_400_000) return '어제';
-  return new Date(t).toLocaleDateString('ko-KR');
+const fmtTime = (ts) => (ts ? new Date(ts).toLocaleString(I18N.locale, { hour12: false }) : '');
+const fmtHm = (ts) => (ts ? new Date(ts).toLocaleTimeString(I18N.locale, { hour12: false, hour: '2-digit', minute: '2-digit' }) : '');
+function rel(ts) {
+  if (!ts) return '';
+  const d = Date.now() - ts;
+  if (d < 60_000) return t('app.just_now');
+  if (d < 3_600_000) return t('app.min_ago', { n: Math.floor(d / 60_000) });
+  if (d < 86_400_000) return t('app.hours_ago', { n: Math.floor(d / 3_600_000) });
+  if (d < 2 * 86_400_000) return t('app.yesterday');
+  return new Date(ts).toLocaleDateString(I18N.locale);
 }
 function dur(ms) {
   const s = Math.max(0, Math.floor(ms / 1000));
-  if (s < 60) return `${s}초`;
+  if (s < 60) return t('app.secs', { n: s });
   const m = Math.floor(s / 60);
-  if (m < 60) return `${m}분 ${s % 60}초`;
-  return `${Math.floor(m / 60)}시간 ${m % 60}분`;
+  if (m < 60) return t('app.dur_ms', { m, s: s % 60 });
+  return t('app.dur_hm', { h: Math.floor(m / 60), m: m % 60 });
 }
 const pname = (id) => S.participants.get(id)?.name ?? id;
 const initials = (id) => {
   const n = pname(id).trim();
+  if (isAgent(id)) return n.slice(0, 1).toUpperCase();
   return /^[A-Za-z0-9]/.test(n) ? n.slice(0, 2).toUpperCase() : n.slice(0, 1);
 };
 const isAgent = (id) => S.participants.get(id)?.kind === 'agent';
-const KIND = { instruction: '지시', quote: '인용', observation: '관찰', proposal: '제안', request: '요청' };
+/** 에이전트 작성자 색(디자인 #782) — 에이전트 이름 순서로 tone-0~3. 같은 에이전트는 화면마다 같은 색 */
+const agentTone = (id) => {
+  const ids = [...S.participants.values()].filter((p) => p.kind === 'agent').map((p) => p.id).sort();
+  const i = ids.indexOf(id);
+  return i < 0 ? '' : ` tone-${i % 4}`;
+};
+const KIND = { instruction: t('app.kind_instruction'), quote: t('app.kind_quote'), observation: t('app.kind_observation'), proposal: t('app.kind_proposal'), request: t('app.kind_request') };
 // 공통 상태 라벨 — 화면마다 같은 뜻으로 쓴다(정책 3)
-const STATE = { queued: '대기 중', running: '실행 중', succeeded: '완료', failed: '실행 실패', cancelled: '취소됨', unknown: '상태 미확인' };
+const STATE = { queued: t('app.state_queued'), running: t('app.state_running'), succeeded: t('app.state_succeeded'), failed: t('app.state_failed'), cancelled: t('app.state_cancelled'), unknown: t('app.state_unknown') };
 const RUN_ERR = {
-  cancelled_by_master: '마스터가 취소함',
-  stop_new: '«새 호출 금지»로 거둠',
-  generation_rotated: '세션 교체로 취소됨',
-  lease_expired: '어댑터 응답이 끊김',
-  cancel_ack_timeout: '어댑터가 중단을 확인하지 않음(무응답 제한)',
+  cancelled_by_master: t('app.runerr_cancelled_by_master'),
+  stop_new: t('app.runerr_stop_new'),
+  generation_rotated: t('app.runerr_generation_rotated'),
+  lease_expired: t('app.runerr_lease_expired'),
+  cancel_ack_timeout: t('app.runerr_cancel_ack_timeout'),
 };
 // 취소 처리 결과(서버 판정 run.cancel_outcome) — 정책 1 «화면 안내»의 구분
 const OUTCOME = {
-  queued_cancelled: '대기 중 취소',
-  requested: '중단 요청됨',
-  acked: '중단 완료',
-  no_ack: '실행 상태 미확인',
-  completed_first: '완료 우선 확정',
-  failed_first: '실패 우선 확정',
-  withdrawn: '새 호출 금지로 거둠',
-  rotated: '세션 교체로 취소',
-  legacy: '즉시 취소(이전 방식)',
+  queued_cancelled: t('app.outcome_queued_cancelled'),
+  requested: t('app.cancel_requested'),
+  acked: t('app.outcome_acked'),
+  no_ack: t('app.outcome_no_ack'),
+  completed_first: t('app.outcome_completed_first'),
+  failed_first: t('app.outcome_failed_first'),
+  withdrawn: t('app.outcome_withdrawn'),
+  rotated: t('app.outcome_rotated'),
+  legacy: t('app.outcome_legacy'),
 };
 /** «중단 요청됨»은 상태가 아니라 running + 요청 기록 — 화면에서는 따로 보인다 */
 const runStateKey = (r) => (r.state === 'running' && r.cancel_requested_at ? 'requested' : r.state);
-const stateLabel = (r) => (runStateKey(r) === 'requested' ? '중단 요청됨' : STATE[r.state] ?? r.state);
+const stateLabel = (r) => (runStateKey(r) === 'requested' ? t('app.cancel_requested') : STATE[r.state] ?? r.state);
 const SEND_ERR = {
-  thread_closed: '이 대화는 닫혀 있습니다',
-  no_thread: '이 대화를 열 수 없습니다(권한이 없거나 없어진 대화)',
-  no_post_permission: '이 대화에 쓸 권한이 없습니다',
-  bad_recipient: '수신자가 이 대화의 멤버 에이전트가 아닙니다',
-  call_budget_exceeded: '수신자 수가 호출 예산보다 많습니다(⋯에서 예산을 올리세요)',
-  bad_call_budget: '호출 예산은 0~10 입니다',
-  client_key_reused: '같은 요청 식별자가 다른 내용에 쓰였습니다',
-  too_large: '본문이 너무 깁니다',
-  bad_request: '요청이 올바르지 않습니다',
-  bad_attachment: '첨부를 찾을 수 없습니다(오래돼 걷혔을 수 있음) — 고쳐 쓰기로 다시 붙이세요',
-  too_many_attachments: '첨부는 한 메시지에 5개까지입니다',
+  thread_closed: t('app.senderr_thread_closed'),
+  no_thread: t('app.senderr_no_thread'),
+  no_post_permission: t('app.senderr_no_post_permission'),
+  bad_recipient: t('app.senderr_bad_recipient'),
+  call_budget_exceeded: t('app.senderr_call_budget_exceeded'),
+  bad_call_budget: t('app.senderr_bad_call_budget'),
+  client_key_reused: t('app.senderr_client_key_reused'),
+  too_large: t('app.senderr_too_large'),
+  bad_request: t('app.senderr_bad_request'),
+  bad_attachment: t('app.senderr_bad_attachment'),
+  too_many_attachments: t('app.senderr_too_many_attachments'),
 };
 const ATT_MAX = 5;
 const ATT_MAX_BYTES = 20 * 1024 * 1024;
@@ -278,7 +286,7 @@ function fmtSize(n) {
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(n < 10 * 1024 ? 1 : 0)} KB`;
   return `${(n / 1024 / 1024).toFixed(1)} MB`;
 }
-const kindLabel = (t) => (t?.kind === 'room' ? '채팅방' : '스레드');
+const kindLabel = (th) => (th?.kind === 'room' ? t('app.kind_room') : t('app.kind_thread'));
 const threadById = (id) => S.threads.find((t) => t.id === id);
 const room = () => S.threads.find((t) => t.kind === 'room') ?? null;
 function pathOf(t) {
@@ -301,7 +309,7 @@ function announce(text) {
 
 // ───── API ─────
 async function api(method, path, body, raw) {
-  const opts = { method, headers: {}, credentials: 'same-origin' };
+  const opts = { method, headers: { 'X-BS-Lang': I18N.lang }, credentials: 'same-origin' };
   if (raw) {
     opts.headers['Content-Type'] = 'application/octet-stream';
     opts.body = raw;
@@ -313,7 +321,7 @@ async function api(method, path, body, raw) {
   const json = await res.json().catch(() => null);
   if (res.status === 401 && path !== '/api/auth/login') {
     showLogin();
-    throw Object.assign(new Error('로그인 필요'), { status: 401 });
+    throw Object.assign(new Error(t('app.login_required')), { status: 401 });
   }
   if (!res.ok) throw Object.assign(new Error(json?.message || json?.error || res.statusText), { status: res.status, code: json?.error, json });
   return Object.assign(json ?? {}, { _status: res.status });
@@ -343,7 +351,7 @@ $('confirm-ok').addEventListener('click', () => confirmResolve && confirmResolve
 $('confirm-no').addEventListener('click', () => confirmResolve && confirmResolve(false));
 $('confirm-x').addEventListener('click', () => confirmResolve && confirmResolve(false));
 function notify(title, text) {
-  return ask({ title, text, ok: '확인' });
+  return ask({ title, text, ok: t('app.ok') });
 }
 
 // ───── 로그인 ─────
@@ -351,6 +359,7 @@ function showLogin() {
   $('app-view').hidden = true;
   $('login-view').hidden = false;
   $('logout-btn').hidden = true;
+  $('top-aux-btn').hidden = true;
   $('me').textContent = '';
   if (S.ws) S.ws.close();
 }
@@ -362,7 +371,7 @@ $('login-form').addEventListener('submit', async (e) => {
     $('login-pass').value = '';
     await boot();
   } catch (err) {
-    $('login-err').textContent = err.status === 429 ? '시도가 너무 많습니다. 잠시 뒤에 다시 하세요.' : '패스프레이즈가 맞지 않습니다.';
+    $('login-err').textContent = err.status === 429 ? t('app.login_too_many') : t('app.login_bad_pass');
   }
 });
 $('logout-btn').addEventListener('click', async () => {
@@ -373,15 +382,16 @@ $('logout-btn').addEventListener('click', async () => {
 // ───── 좁은 화면: 서랍·시트는 동시에 하나만 ─────
 const isNarrow = () => (typeof matchMedia === 'function' ? matchMedia('(max-width: 760px)').matches : false);
 /** 보조 패널이 대화 위를 덮는 폭(작성란 전송 버튼이 가려질 수 있음) */
-const auxOverlays = () => (typeof matchMedia === 'function' ? matchMedia('(max-width: 999px)').matches : false);
+const listDrawer = () => (typeof matchMedia === 'function' ? matchMedia('(max-width: 999px)').matches : false); // 대화 목록이 서랍인 폭(디자인 #782)
+const auxOverlays = () => (typeof matchMedia === 'function' ? matchMedia('(max-width: 1279px)').matches : false); // 보조 패널이 대화를 덮는 폭(디자인 #782 · 1279 아래는 서랍)
 function setDrawer(open) {
   document.body.classList.toggle('show-sidebar', open);
   $('menu-btn').setAttribute('aria-expanded', String(open));
-  if (open && isNarrow()) setAux(false);
+  if (open && listDrawer()) setAux(false);
   syncBackdrop();
 }
 function syncBackdrop() {
-  $('backdrop').hidden = !(isNarrow() && document.body.classList.contains('show-sidebar'));
+  $('backdrop').hidden = !(listDrawer() && document.body.classList.contains('show-sidebar'));
 }
 $('menu-btn').addEventListener('click', () => {
   const open = !document.body.classList.contains('show-sidebar');
@@ -402,6 +412,9 @@ $('backdrop').addEventListener('click', () => setDrawer(false));
 for (const b of document.querySelectorAll('.menu-item')) {
   b.addEventListener('click', () => {
     const m = b.dataset.menu;
+    // 좁은 화면에서 메뉴는 서랍 안에 있다(디자인 #782) — 고르면 서랍을 닫는다
+    if (isNarrow() && document.body.classList.contains('show-sidebar')) setDrawer(false);
+    if (m === 'logout') return $('logout-btn').click();
     if (m === 'runs' || m === 'audit' || m === 'agents') {
       location.hash = m;
       return;
@@ -417,6 +430,21 @@ for (const b of document.querySelectorAll('.menu-item')) {
     } else setAux(true, m);
   });
 }
+// ───── 메뉴 접기(디자인 #782): 넓은 화면에서 메뉴를 아이콘 줄(64px)로 · 이 브라우저에 기억 · 기억이 없으면 1280px 아래에서 접힘 ─────
+function setRail(collapsed, remember) {
+  document.body.classList.toggle('rail-collapsed', collapsed);
+  const b = $('rail-btn');
+  b.setAttribute('aria-expanded', String(!collapsed));
+  const label = collapsed ? t('app.menu_expand') : t('app.menu_collapse');
+  b.setAttribute('aria-label', label);
+  b.title = label;
+  if (remember) store('bs.rail', collapsed ? 'collapsed' : 'open');
+}
+$('rail-btn').addEventListener('click', () => setRail(!document.body.classList.contains('rail-collapsed'), true));
+{
+  const saved = store('bs.rail');
+  setRail(saved ? saved === 'collapsed' : typeof matchMedia === 'function' && matchMedia('(max-width: 1279px)').matches, false);
+}
 function syncMenu() {
   // 실행 화면이면 «실행 상태». 대화 작업 중에는 보조 패널의 세션·참여자 탭을 따른다(실행 탭은 대화 작업의 일부)
   const active = S.mode !== 'convo' ? S.mode : S.auxOpen && S.tab !== 'runs' ? S.tab : 'convo';
@@ -425,8 +453,6 @@ function syncMenu() {
     b.classList.toggle('active', on);
     if (on) b.setAttribute('aria-current', 'page');
     else b.removeAttribute('aria-current');
-    // 좁은 폭에서 메뉴는 가로 띠(넘치면 옆으로 밀림) — 지금 화면의 메뉴가 보이게
-    if (on && typeof matchMedia === 'function' && matchMedia('(max-width: 1279px)').matches && b.scrollIntoView) b.scrollIntoView({ block: 'nearest', inline: 'nearest' });
   }
 }
 
@@ -438,9 +464,10 @@ function setAux(open, tab) {
   store('bs.aux-open', open ? '1' : '0');
   $('aux').hidden = !open;
   $('app-view').classList.toggle('aux-open', open);
-  $('aux-btn').textContent = open ? '보조 패널 닫기' : '보조 패널 열기';
+  $('aux-btn').textContent = open ? t('app.aux_close') : t('app.aux_open');
   $('aux-btn').setAttribute('aria-expanded', String(open));
-  if (open && isNarrow()) setDrawer(false);
+  $('top-aux-btn').setAttribute('aria-expanded', String(open));
+  if (open && listDrawer()) setDrawer(false);
   for (const b of document.querySelectorAll('.tabs [role=tab]')) {
     const on = b.dataset.tab === S.tab;
     b.setAttribute('aria-selected', String(on));
@@ -454,6 +481,7 @@ function setAux(open, tab) {
   if (open && S.tab === 'claims') loadClaims().catch(() => {});
 }
 $('aux-btn').addEventListener('click', () => setAux(!S.auxOpen));
+$('top-aux-btn').addEventListener('click', () => setAux(!S.auxOpen));
 $('aux-close').addEventListener('click', () => setAux(false));
 for (const b of document.querySelectorAll('.tabs [role=tab]')) {
   b.addEventListener('click', () => setAux(true, b.dataset.tab));
@@ -493,7 +521,7 @@ function stateOf(t) {
   if (t.hidden) return 'hidden';
   return t.status === 'archived' ? 'archived' : 'open';
 }
-const STATE_LABEL = { room: '활성', open: '열림', archived: '보관', hidden: '숨김', trash: '휴지통' };
+const STATE_LABEL = { room: t('app.active'), open: t('app.tstate_open'), archived: t('app.tstate_archived'), hidden: t('app.tstate_hidden'), trash: t('app.tstate_trash') };
 // 필터: 진행 중(열림·안 숨김) · 보관 포함 · 보관 · 숨김 · 휴지통 — 휴지통은 휴지통 필터에서만 보인다
 const FILTERS = {
   open: (t) => !t.deleted_at && !t.hidden && t.status === 'open',
@@ -549,31 +577,33 @@ function hasNew(t) {
   const s = awaitMap()[t.id];
   return s != null && (t.last_seq ?? 0) > s && !viewing(t.id);
 }
-const newBadge = (inner) => el('span', { class: `new-badge${inner ? ' inner' : ''}`, title: inner ? '접힌 분기에 보낸 뒤 안 본 답이 있음' : '보낸 뒤 안 본 답이 있음', 'aria-label': '새 답' }, 'N');
-function convItem(t, depth, tree) {
-  const active = t.id === S.cur;
-  const paused = t.invoke_paused ? '⏸ 새 호출 금지 · ' : '';
+const newBadge = (inner) => el('span', { class: `new-badge${inner ? ' inner' : ''}`, title: inner ? t('app.new_badge_inner_title') : t('app.new_badge_title'), 'aria-label': t('app.new_badge_aria') }, 'N');
+function convItem(th, depth, tree) {
+  const active = th.id === S.cur;
+  const paused = th.invoke_paused ? t('app.paused_prefix') : '';
   let l2;
-  if (t.kind === 'room') {
+  if (th.kind === 'room') {
     const n = S.roomDetail?.members.filter((m) => m.kind === 'agent').length ?? 0;
-    l2 = `${paused}에이전트 ${n}개 · ${rel(t.updated_at)}`;
+    l2 = t('app.room_line', { paused, n, time: rel(th.updated_at) });
   } else {
-    const parent = t.parent_thread_id ? threadById(t.parent_thread_id) : null;
-    const from = parent ? `${parent.kind === 'room' ? '메인 채팅방' : parent.title} #${t.fork_seq}에서` : '독립 스레드';
-    l2 = `${paused}${from} · ${rel(t.updated_at)}`;
+    const parent = th.parent_thread_id ? threadById(th.parent_thread_id) : null;
+    const from = parent ? t('app.forked_from', { parent: parent.kind === 'room' ? t('app.main_room') : parent.title, seq: th.fork_seq }) : t('app.standalone_thread');
+    l2 = `${paused}${from} · ${rel(th.updated_at)}`;
   }
-  const st = stateOf(t);
+  const st = stateOf(th);
   const n = tree?.kids ?? 0;
   const a = el(
     'a',
-    { href: `#${t.id}`, class: `conv-item${active ? ' active' : ''}${st !== 'open' && st !== 'room' ? ' dimmed' : ''}`, 'aria-current': active ? 'true' : null, 'data-id': t.id },
+    { href: `#${th.id}`, class: `conv-item${active ? ' active' : ''}${st !== 'open' && st !== 'room' ? ' dimmed' : ''}`, 'aria-current': active ? 'true' : null, 'data-id': th.id },
     el(
       'div',
       { class: 'l1' },
-      el('span', { class: 'ttl' }, t.title),
-      hasNew(t) ? newBadge(false) : tree?.kidsNew ? newBadge(true) : null,
-      tree?.collapsed && n ? el('span', { class: 'kids', title: `접힌 분기 ${n}개` }, `+${n}`) : null,
-      el('span', { class: `pill st-${st}` }, STATE_LABEL[st]),
+      el('span', { class: 'ttl' }, th.title),
+      hasNew(th) ? newBadge(false) : tree?.kidsNew ? newBadge(true) : null,
+      tree?.collapsed && n ? el('span', { class: 'kids', title: t('app.collapsed_branches', { n }) }, `+${n}`) : null,
+      S.live.has(th.id)
+        ? el('span', { class: 'live', title: t('app.running_names', { names: S.live.get(th.id).join(', ') }) }, S.live.get(th.id)[0] + (S.live.get(th.id).length > 1 ? ` +${S.live.get(th.id).length - 1}` : ''))
+        : el('span', { class: `pill st-${st}` }, STATE_LABEL[st]),
     ),
     el('div', { class: 'l2' }, l2),
   );
@@ -585,8 +615,8 @@ function convItem(t, depth, tree) {
           type: 'button',
           class: 'twisty',
           'aria-expanded': tree.collapsed ? 'false' : 'true',
-          'aria-label': `${t.title} 분기 ${n}개 ${tree.collapsed ? '펼치기' : '접기'}`,
-          onclick: () => toggleCollapsed(t.id),
+          'aria-label': t(tree.collapsed ? 'app.branch_expand_aria' : 'app.branch_collapse_aria', { title: th.title, n }),
+          onclick: () => toggleCollapsed(th.id),
         },
         tree.collapsed ? '▸' : '▾',
       )
@@ -598,7 +628,7 @@ function renderList() {
   const filter = FILTERS[$('thread-filter').value] ? $('thread-filter').value : 'open';
   const r = room();
   const rl = $('room-list');
-  rl.replaceChildren(...(r && (!q || r.title.toLowerCase().includes(q)) ? [convItem(r, 0)] : [el('div', { class: 'empty-list' }, r ? '검색 결과 없음' : '채팅방이 아직 없습니다')]));
+  rl.replaceChildren(...(r && (!q || r.title.toLowerCase().includes(q)) ? [convItem(r, 0)] : [el('div', { class: 'empty-list' }, r ? t('app.no_search_results') : t('app.no_room_yet'))]));
   const threads = S.threads.filter((t) => t.kind !== 'room' && FILTERS[filter](t));
   const nav = $('thread-list');
   const items = [];
@@ -628,12 +658,12 @@ function renderList() {
     };
     walk('', 0);
   }
-  const empty = q ? '검색 결과 없음' : filter === 'open' ? '스레드가 없습니다 — 메시지에서 «스레드 생성»' : `${$('thread-filter').selectedOptions[0]?.textContent ?? ''} 스레드가 없습니다`;
+  const empty = q ? t('app.no_search_results') : filter === 'open' ? t('app.no_threads_hint') : t('app.no_threads_filter', { filter: $('thread-filter').selectedOptions[0]?.textContent ?? '' });
   nav.replaceChildren(...(items.length ? items : [el('div', { class: 'empty-list' }, empty)]));
   const tb = $('tree-toggle-all');
   tb.hidden = !!q || parents === 0;
   const anyOpen = threads.some((t) => !collapsedSet().has(t.id) && threads.some((c) => c.parent_thread_id === t.id));
-  tb.textContent = anyOpen ? '모두 접기' : '모두 펼치기';
+  tb.textContent = anyOpen ? t('app.collapse_all') : t('app.expand_all');
   tb.dataset.mode = anyOpen ? 'close' : 'open';
 }
 $('tree-toggle-all').addEventListener('click', () => {
@@ -718,7 +748,7 @@ async function openThread(id) {
     if (!id) {
       $('thread').hidden = true;
       $('empty').hidden = false;
-      $('empty').textContent = '메인 채팅방이 아직 없습니다(마스터 등록 전).';
+      $('empty').textContent = t('app.no_main_room');
       return;
     }
     history.replaceState(null, '', `#${id}`);
@@ -744,8 +774,8 @@ async function openThread(id) {
   try {
     await Promise.all([loadDetail(), loadContext(), fetchNew(), loadRuns()]);
     syncEmpty();
-    const t = S.detail.thread;
-    announce(`${kindLabel(t)} ${t.title} 열림. 작성 대상: ${pathOf(t)}`);
+    const th = S.detail.thread;
+    announce(t('app.thread_opened', { kind: kindLabel(th), title: th.title, path: pathOf(th) }));
     renderList();
   } catch (err) {
     if (id !== S.cur) return;
@@ -754,14 +784,14 @@ async function openThread(id) {
       el(
         'div',
         { class: 'empty-thread' },
-        el('p', {}, el('b', {}, '이 대화를 열 수 없습니다.')),
-        el('p', { class: 'muted small' }, err.status === 404 ? '권한이 없거나 없어진 대화입니다. 이 대화에는 메시지를 보낼 수 없습니다.' : `오류: ${err.message}`),
-        room() && room().id !== id ? el('button', { type: 'button', class: 'primary', onclick: () => (location.hash = room().id) }, '메인 채팅방으로') : null,
+        el('p', {}, el('b', {}, t('app.cannot_open_dot'))),
+        el('p', { class: 'muted small' }, err.status === 404 ? t('app.cannot_open_404') : t('app.error_msg', { msg: err.message })),
+        room() && room().id !== id ? el('button', { type: 'button', class: 'primary', onclick: () => (location.hash = room().id) }, t('app.to_main_room')) : null,
       ),
     );
-    $('c-target').textContent = '(열 수 없는 대화)';
+    $('c-target').textContent = t('app.unopenable');
     syncSendable();
-    announce('이 대화를 열 수 없습니다');
+    announce(t('app.cannot_open'));
   }
 }
 
@@ -785,29 +815,29 @@ async function loadDetail() {
 function renderHead() {
   const d = S.detail;
   if (!d) return;
-  const t = d.thread;
-  $('t-kind').textContent = kindLabel(t);
-  $('t-kind').className = `pill ${t.kind === 'room' ? 'room' : ''}`;
-  $('t-title').textContent = t.title;
-  renderStateMenu(t);
-  $('t-audit').href = `#audit?thread=${encodeURIComponent(t.id)}&since=`;
-  $('people-perm').href = `#members?thread=${encodeURIComponent(t.id)}`;
-  const parent = t.parent_thread_id ? threadById(t.parent_thread_id) : null;
-  if (t.kind === 'room') $('t-path').textContent = '모든 에이전트가 참여하는 단체 채팅방입니다. 주제별 대화는 «스레드 생성»으로 갈라 냅니다.';
+  const th = d.thread;
+  $('t-kind').textContent = kindLabel(th);
+  $('t-kind').className = `pill ${th.kind === 'room' ? 'room' : ''}`;
+  $('t-title').textContent = th.title;
+  renderStateMenu(th);
+  $('t-audit').href = `#audit?thread=${encodeURIComponent(th.id)}&since=`;
+  $('people-perm').href = `#members?thread=${encodeURIComponent(th.id)}`;
+  const parent = th.parent_thread_id ? threadById(th.parent_thread_id) : null;
+  if (th.kind === 'room') $('t-path').textContent = t('app.room_path');
   else if (parent) {
-    const fp = [...S.context, ...S.messages].find((m) => m.seq === t.fork_seq);
-    $('t-path').textContent = `${parent.kind === 'room' ? '메인 채팅' : parent.title} #${t.fork_seq}에서 분기${fp ? ` · 분기 시점 ${fmtTime(fp.created_at)} · ${pname(fp.author_id)}` : ''}`;
-  } else $('t-path').textContent = '부모 없는 스레드(메인 채팅방 도입 전에 만든 대화)';
+    const fp = [...S.context, ...S.messages].find((m) => m.seq === th.fork_seq);
+    $('t-path').textContent = `${t('app.branched_from', { parent: parent.kind === 'room' ? t('app.main_chat') : parent.title, seq: th.fork_seq })}${fp ? t('app.branch_point_suffix', { time: fmtTime(fp.created_at), author: pname(fp.author_id) }) : ''}`;
+  } else $('t-path').textContent = t('app.orphan_thread');
   // 합치기(#706): 하위 스레드면 머리에 «⤴ 상위로 합치기 (안 합친 글 N)» · 지난 합침은 경로 줄 끝에
   const mb = $('t-merge');
-  mb.hidden = !(S.me?.is_master && parent && t.kind !== 'room');
+  mb.hidden = !(S.me?.is_master && parent && th.kind !== 'room');
   if (!mb.hidden) {
     const n = d.unmerged ?? 0;
-    mb.textContent = n ? `⤴ 상위로 합치기 (${n})` : '⤴ 상위로 합치기';
+    mb.textContent = n ? t('app.merge_up_n', { n }) : t('app.merge_up_btn');
     mb.disabled = !n;
-    mb.title = n ? `이 스레드의 글 ${n}개를 «${parent.kind === 'room' ? '메인 채팅방' : parent.title}»에 묶음으로 옮겨 거기서 이어 간다` : '지난 합침 뒤 새 글이 없습니다';
+    mb.title = n ? t('app.merge_up_title', { n, parent: parent.kind === 'room' ? t('app.main_room') : parent.title }) : t('app.no_new_since_merge');
     const ms = d.merges ?? [];
-    if (ms.length) $('t-path').textContent += ` · 상위로 합침 ${ms.length}번(마지막 #${ms[ms.length - 1].to_seq}까지)`;
+    if (ms.length) $('t-path').textContent += t('app.merged_up_suffix', { n: ms.length, seq: ms[ms.length - 1].to_seq });
   }
   renderSummary();
 }
@@ -815,15 +845,15 @@ $('t-merge').addEventListener('click', async () => {
   const d = S.detail;
   const parent = d?.thread.parent_thread_id ? threadById(d.thread.parent_thread_id) : null;
   if (!parent || !d.unmerged) return;
-  const where = parent.kind === 'room' ? '메인 채팅방' : `«${parent.title}»`;
-  const again = (d.merges ?? []).length ? ' 지난 합침 뒤의 글만 옮깁니다.' : '';
-  if (!(await ask({ title: '상위로 합치기', text: `이 스레드의 글 ${d.unmerged}개를 ${where}에 묶음 글 하나로 옮깁니다.${again} 거기서 이어서 이야기하면 에이전트도 그 묶음을 읽습니다. 이 스레드는 그대로 남습니다.`, ok: '합치기' }))) return;
+  const where = parent.kind === 'room' ? t('app.main_room') : `«${parent.title}»`;
+  const again = (d.merges ?? []).length ? t('app.merge_again') : '';
+  if (!(await ask({ title: t('app.merge_up'), text: t('app.merge_up_text', { n: d.unmerged, where, again }), ok: t('app.merge') }))) return;
   try {
     const r = await api('POST', `/api/threads/${d.thread.id}/merge`);
-    announce(`합침 완료: ${r.parent.title}`);
+    announce(t('app.merged_done', { title: r.parent.title }));
     location.hash = r.parent.id;
   } catch (e) {
-    notify('합치기 실패', e.message);
+    notify(t('app.merge_failed'), e.message);
   }
 });
 function renderSummary() {
@@ -833,22 +863,22 @@ function renderSummary() {
   const active = S.runs.filter((r) => r.state === 'queued' || r.state === 'running').length;
   const waiting = S.deliveries.filter((x) => (x.status === 'pending' || x.status === 'leased') && !S.runs.some((r) => r.trigger_seq === x.message_seq && r.agent_id === x.recipient_id)).length;
   const unknown = S.runs.filter((r) => r.state === 'unknown').length;
-  const gens = d.sessions.filter((s) => s.status === 'active').map((s) => `${pname(s.agent_id)} ${s.generation}세대${s.metrics?.ctx_tokens ? ` · ${ctxK(s.metrics.ctx_tokens)}` : ''}`);
-  const t = d.thread;
+  const gens = d.sessions.filter((s) => s.status === 'active').map((s) => `${pname(s.agent_id)} ${t('app.gen_n', { n: s.generation })}${s.metrics?.ctx_tokens ? ` · ${ctxK(s.metrics.ctx_tokens)}` : ''}`);
+  const th = d.thread;
   $('t-summary').replaceChildren(
-    el('span', {}, '전송 대상 ', el('b', {}, agents.length ? agents.map((a) => a.name).join(', ') : '에이전트 없음')),
-    el('span', {}, '현재 대화 ', el('b', {}, pathOf(t))),
-    el('span', {}, '실행 ', el('b', {}, `진행 ${active + waiting}`), unknown ? el('span', { class: 'alertish' }, ` · 미확인 ${unknown}`) : null),
-    el('span', {}, '세대 ', el('b', {}, gens.length ? gens.join(', ') : '아직 없음')),
-    ...(t.invoke_paused ? [el('span', { class: 'alertish' }, '⏸ 새 호출 금지 중')] : []),
+    el('span', {}, t('app.sum_targets'), el('b', {}, agents.length ? agents.map((a) => a.name).join(', ') : t('app.no_agents'))),
+    el('span', {}, t('app.sum_current'), el('b', {}, pathOf(th))),
+    el('span', {}, t('app.sum_runs'), el('b', {}, t('app.in_progress_n', { n: active + waiting })), unknown ? el('span', { class: 'alertish' }, t('app.unknown_n_suffix', { n: unknown })) : null),
+    el('span', {}, t('app.sum_gens'), el('b', {}, gens.length ? gens.join(', ') : t('app.none_yet'))),
+    ...(th.invoke_paused ? [el('span', { class: 'alertish' }, t('app.paused_badge'))] : []),
   );
   // 머리에는 손이 필요한 경고만 남긴다(새 호출 금지 · 미확인 실행 · 보류된 요청) — 나머지 정보는 보조 패널(#325)
   const held = openHolds().length;
   const alerts = [
-    ...(t.invoke_paused ? [el('span', { class: 'alertish' }, '⏸ 새 호출 금지 중')] : []),
-    ...(unknown ? [el('span', { class: 'alertish' }, `미확인 실행 ${unknown} — 보조 패널 «실행»`)] : []),
+    ...(th.invoke_paused ? [el('span', { class: 'alertish' }, t('app.paused_badge'))] : []),
+    ...(unknown ? [el('span', { class: 'alertish' }, t('app.unknown_runs_alert', { n: unknown }))] : []),
     ...(held
-      ? [el('button', { type: 'button', class: 'alertish linkish', id: 't-holds', title: '에이전트가 보류했거나 연쇄 상한에 걸린 요청 — 사유를 보고 «확인함»', onclick: () => setAux(true, 'runs') }, `보류된 요청 ${held} — 보조 패널 «실행»`)]
+      ? [el('button', { type: 'button', class: 'alertish linkish', id: 't-holds', title: t('app.holds_alert_title'), onclick: () => setAux(true, 'runs') }, t('app.holds_alert', { n: held }))]
       : []),
   ];
   $('t-alert').replaceChildren(...alerts);
@@ -872,20 +902,20 @@ function renderRecipients() {
   const def = d.thread.default_recipient ?? sole;
   const chip = (value, label, checked, { key, ...extra } = {}) => {
     const input = el('input', { type: 'checkbox', value, checked, ...extra });
-    const c = el('label', { class: `chip${checked ? ' on' : ''}`, title: key ? `단축키 ${key}` : null }, input, label);
+    const c = el('label', { class: `chip${checked ? ' on' : ''}`, title: key ? t('app.shortcut', { key }) : null }, input, label);
     input.addEventListener('change', () => onChip(input));
     return c;
   };
   box.replaceChildren(
-    el('span', { class: 'lbl' }, '수신 대상'),
+    el('span', { class: 'lbl' }, t('app.recipients')),
     ...(agents.length
       ? [
           // «메모» = 명시적으로 아무에게도 안 보냄(마스터 #271) — 에이전트를 고르면 꺼지고, 메모를 켜면 에이전트가 다 꺼진다
-          chip('*memo', '메모', false, { 'data-memo': '1', title: '아무 에이전트도 부르지 않고 메시지만 남깁니다' }),
-          chip('*all', '전체', agents.length > 0 && agents.every((a) => a.participant_id === def), { 'data-all': '1', title: '이 대화의 멤버 에이전트 전부(이름을 골라야만 부르는 에이전트는 빼고)', key: 'Alt+0' }),
+          chip('*memo', t('app.memo'), false, { 'data-memo': '1', title: t('app.memo_title') }),
+          chip('*all', t('app.all'), agents.length > 0 && agents.every((a) => a.participant_id === def), { 'data-all': '1', title: t('app.all_title'), key: 'Alt+0' }),
           ...agents.map((a, i) => chip(a.participant_id, a.name, a.participant_id === def, { 'data-agent': '1', ...(i < 9 ? { key: `Alt+${i + 1}` } : {}), ...(S.onCallOnly?.has(a.participant_id) ? { 'data-oncall': '1' } : {}) })),
         ]
-      : [el('span', { class: 'small faint' }, '멤버 에이전트가 없습니다 — 메시지만 저장됩니다')]),
+      : [el('span', { class: 'small faint' }, t('app.no_member_agents_saved'))]),
     el('span', { class: 'small faint', id: 'rcpt-note' }),
   );
   applyPrefillTo();
@@ -942,14 +972,14 @@ function syncChips() {
   if (note) {
     note.classList.remove('rcpt-warn');
     const hasAgents = !!$('recipients').querySelector('input[data-agent]');
-    note.textContent = n ? `→ ${n}명 호출` : memoChosen() || !hasAgents ? '아무도 부르지 않음(메시지만 저장)' : '받는 쪽을 고르세요 — 에이전트 또는 «메모»';
+    note.textContent = n ? t('app.calling_n', { n }) : memoChosen() || !hasAgents ? t('app.calling_none') : t('app.pick_recipient');
   }
   syncMore();
 }
 function syncMore() {
   const sk = $('source-kind');
-  const parts = [`출처 ${sk.options[sk.selectedIndex].text}`];
-  if (selectedRecipients().length) parts.push(`예산 ${$('budget').value}`);
+  const parts = [t('app.more_source', { kind: sk.options[sk.selectedIndex].text })];
+  if (selectedRecipients().length) parts.push(t('app.more_budget', { n: $('budget').value }));
   $('more-sum').textContent = parts.join(' · ');
 }
 $('source-kind').addEventListener('change', syncMore);
@@ -962,14 +992,14 @@ function addFiles(files) {
   const skipped = [];
   for (const f of list) {
     if (S.attach.length >= ATT_MAX) {
-      skipped.push(`${f.name}(${ATT_MAX}개 초과)`);
+      skipped.push(t('app.att_skip_count', { name: f.name, max: ATT_MAX }));
       continue;
     }
-    if (f.size === 0) skipped.push(`${f.name}(빈 파일)`);
-    else if (f.size > ATT_MAX_BYTES) skipped.push(`${f.name}(${fmtSize(f.size)} — 20MB 초과)`);
+    if (f.size === 0) skipped.push(t('app.att_skip_empty', { name: f.name }));
+    else if (f.size > ATT_MAX_BYTES) skipped.push(t('app.att_skip_size', { name: f.name, size: fmtSize(f.size) }));
     else S.attach.push({ file: f, url: /^image\/(png|jpeg|gif|webp)$/.test(f.type) && URL.createObjectURL ? URL.createObjectURL(f) : null });
   }
-  if (skipped.length) notify('첨부 안 함', skipped.join(', '));
+  if (skipped.length) notify(t('app.att_skipped'), skipped.join(', '));
   renderAttach();
 }
 function removeAttach(x) {
@@ -988,7 +1018,7 @@ function renderAttach() {
         x.url ? el('img', { class: 'att-thumb', src: x.url, alt: '' }) : el('span', { 'aria-hidden': 'true' }, '📄'),
         el('span', { class: 'att-name' }, x.file.name),
         el('span', { class: 'faint' }, fmtSize(x.file.size)),
-        el('button', { type: 'button', class: 'att-x', 'aria-label': `${x.file.name} 빼기`, onclick: () => removeAttach(x) }, '✕'),
+        el('button', { type: 'button', class: 'att-x', 'aria-label': t('app.att_remove', { name: x.file.name }), onclick: () => removeAttach(x) }, '✕'),
       ),
     ),
   );
@@ -1022,7 +1052,7 @@ $('body').addEventListener('paste', (e) => {
   if (!files.length) return; // 글자 붙여넣기는 그대로
   e.preventDefault();
   // 캡처 붙여넣기는 이름이 늘 image.png — 시각을 붙여 가른다
-  addFiles(files.map((f) => (f.name === 'image.png' ? new File([f], `붙여넣기-${stamp()}.png`, { type: f.type }) : f)));
+  addFiles(files.map((f) => (f.name === 'image.png' ? new File([f], t('app.paste_filename', { stamp: stamp() }), { type: f.type }) : f)));
 });
 
 function syncSendable() {
@@ -1133,15 +1163,15 @@ function msgEl(m, inherited) {
     'div',
     { class: 'head' },
     el('b', {}, pname(m.author_id)),
-    el('span', { class: `badge${m.source_kind === 'request' ? ' req' : ''}`, title: m.source_kind === 'request' ? '출처 — 에이전트 간 요청(지시 아님 · 허용 짝) · 요청은 실행 권한을 주지 않는다 — 실행 여부는 받은 쪽이 마스터의 방향 안에서 정한다' : '출처' }, KIND[m.source_kind] ?? m.source_kind),
-    m.input_mode === 'voice' ? el('span', { class: 'badge' }, '음성') : null,
+    el('span', { class: `badge${m.source_kind === 'request' ? ' req' : ''}`, title: m.source_kind === 'request' ? t('app.badge_request_title') : t('app.source') }, KIND[m.source_kind] ?? m.source_kind),
+    m.input_mode === 'voice' ? el('span', { class: 'badge' }, t('app.voice')) : null,
     el('span', {}, `#${m.seq}`),
     el('time', { datetime: new Date(m.created_at).toISOString(), title: fmtTime(m.created_at) }, fmtHm(m.created_at)),
     m.recipients.length
       ? el('span', { class: m.source_kind === 'request' ? 'req-route' : null }, m.source_kind === 'request' ? `${pname(m.author_id)} → ${m.recipients.map(pname).join(', ')}` : `→ ${m.recipients.map(pname).join(', ')}`)
       : null,
     m.reply_to_seq ? el('a', { href: `#m${m.reply_to_seq}`, onclick: (e) => (e.preventDefault(), jumpTo(m.reply_to_seq)) }, `↩ #${m.reply_to_seq}`) : null,
-    mine && !inherited && S.sentKeys.has(m.client_key) ? el('span', { class: 'sendst ok' }, '✓ 전송 완료') : null,
+    mine && !inherited && S.sentKeys.has(m.client_key) ? el('span', { class: 'sendst ok' }, t('app.sent_ok')) : null,
   );
   // 답장·복사·분기는 머리가 아니라 글 아래 한 줄에 «전달…» 과 나란히(마스터 #327) — 전달 칸(.fwdslot)은 renderRunLines 가 채운다
   const bar = el(
@@ -1151,9 +1181,9 @@ function msgEl(m, inherited) {
     el(
       'span',
       { class: 'actions' },
-      inherited ? null : el('button', { type: 'button', onclick: () => setReply(m) }, '답장'),
-      el('button', { type: 'button', title: '이 메시지 본문 복사', onclick: () => copyMessage(m) }, '복사'),
-      el('button', { type: 'button', onclick: () => openFork(m.seq) }, '여기서 분기'),
+      inherited ? null : el('button', { type: 'button', onclick: () => setReply(m) }, t('app.reply')),
+      el('button', { type: 'button', title: t('app.copy_msg_title'), onclick: () => copyMessage(m) }, t('app.copy')),
+      el('button', { type: 'button', onclick: () => openFork(m.seq) }, t('app.branch_here')),
     ),
   );
   const body = el('div', { class: 'body' });
@@ -1179,14 +1209,14 @@ function msgEl(m, inherited) {
           'div',
           { class: 'att-files' },
           ...files.map((a) =>
-            el('a', { class: 'att-file', href: `/api/attachments/${encodeURIComponent(a.id)}`, title: '내려받기' }, `${ATT_ICON[a.kind] ?? '📦'} ${a.name}`, el('span', { class: 'faint' }, ` ${fmtSize(a.size)}`)),
+            el('a', { class: 'att-file', href: `/api/attachments/${encodeURIComponent(a.id)}`, title: t('app.download') }, `${ATT_ICON[a.kind] ?? '📦'} ${a.name}`, el('span', { class: 'faint' }, ` ${fmtSize(a.size)}`)),
           ),
         )
       : null,
   ];
   return el(
     'article',
-    { class: `msg${agent ? ' agent' : ''}${mine ? ' mine' : ''}${inherited ? ' inherited' : ''}`, id: inherited ? `c${m.seq}` : `m${m.seq}`, 'aria-label': `${pname(m.author_id)} #${m.seq}` },
+    { class: `msg${agent ? ' agent' + agentTone(m.author_id) : ''}${mine ? ' mine' : ''}${inherited ? ' inherited' : ''}`, id: inherited ? `c${m.seq}` : `m${m.seq}`, 'aria-label': `${pname(m.author_id)} #${m.seq}` },
     el('span', { class: 'avatar', 'aria-hidden': 'true' }, initials(m.author_id)),
     el('div', { class: 'main' }, head, body, ...atts, inherited ? null : el('div', { class: 'runlines', 'data-seq': String(m.seq) }), bar),
   );
@@ -1195,16 +1225,16 @@ function msgEl(m, inherited) {
 function mergeBox(m) {
   const g = m.merge;
   const list = el('div', { class: 'merge-list', hidden: true });
-  const tog = el('button', { type: 'button', class: 'small', 'aria-expanded': 'false' }, '펼치기');
+  const tog = el('button', { type: 'button', class: 'small', 'aria-expanded': 'false' }, t('app.expand'));
   let loaded = false;
   tog.onclick = async () => {
     const open = list.hidden;
     list.hidden = !open;
-    tog.textContent = open ? '접기' : '펼치기';
+    tog.textContent = open ? t('app.collapse') : t('app.expand');
     tog.setAttribute('aria-expanded', open ? 'true' : 'false');
     if (!open || loaded) return;
     loaded = true;
-    list.replaceChildren(el('div', { class: 'faint' }, '불러오는 중…'));
+    list.replaceChildren(el('div', { class: 'faint' }, t('app.loading')));
     try {
       const got = [];
       let after = g.from_seq - 1;
@@ -1228,7 +1258,7 @@ function mergeBox(m) {
       );
     } catch (e) {
       loaded = false;
-      list.replaceChildren(el('div', { class: 'faint' }, `하위 스레드를 읽지 못했습니다 — ${e.message}`));
+      list.replaceChildren(el('div', { class: 'faint' }, t('app.child_read_failed', { msg: e.message })));
     }
   };
   const known = threadById(g.child_thread_id);
@@ -1238,9 +1268,9 @@ function mergeBox(m) {
     el(
       'div',
       { class: 'merge-h' },
-      el('span', {}, `⤴ 하위 스레드 «${g.child_title}»에서 합침 · 글 ${g.count}개 · #${g.from_seq}~#${g.to_seq}`),
+      el('span', {}, t('app.merged_from_child', { title: g.child_title, n: g.count, from: g.from_seq, to: g.to_seq })),
       tog,
-      known ? el('a', { class: 'small', href: `#${g.child_thread_id}` }, '스레드 열기') : null,
+      known ? el('a', { class: 'small', href: `#${g.child_thread_id}` }, t('app.open_thread')) : null,
     ),
     list,
   );
@@ -1274,12 +1304,12 @@ function attLine(a) {
 async function copyMessage(m) {
   const text = [m.body, ...(m.attachments ?? []).map(attLine)].filter(Boolean).join('\n');
   const ok = await copyText(text);
-  ok ? announce(`#${m.seq} 복사됨`) : notify('복사 실패', '브라우저가 클립보드 쓰기를 막았습니다.');
+  ok ? announce(t('app.copied_seq', { seq: m.seq })) : notify(t('app.copy_failed'), t('app.clipboard_blocked'));
 }
 /** 한 메시지 → 마크다운 덩어리(작성자 · 시각 · 번호 · 본문 · 첨부) */
 function messageMd(m) {
   const p = S.participants.get(m.author_id);
-  const who = p?.is_master ? `${pname(m.author_id)}(마스터)` : pname(m.author_id);
+  const who = p?.is_master ? t('app.who_master', { name: pname(m.author_id) }) : pname(m.author_id);
   const to = m.recipients?.length ? ` → ${m.recipients.map(pname).join(', ')}` : '';
   const re = m.reply_to_seq ? ` · ↩ #${m.reply_to_seq}` : '';
   return [`**${who}**${to} · ${fmtTime(m.created_at)} · #${m.seq}${re}`, m.body, ...(m.attachments ?? []).map(attLine)].filter(Boolean).join('\n');
@@ -1296,24 +1326,24 @@ async function copyThread() {
     if (!r.has_more || !r.messages.length) break;
     after = r.next_cursor;
   }
-  const head = `# ${th.title} (${kindLabel(th)}) — ${all.length}개 메시지 · ${fmtTime(Date.now())} 복사`;
+  const head = t('app.copy_head', { title: th.title, kind: kindLabel(th), n: all.length, time: fmtTime(Date.now()) });
   const ok = await copyText([head, ...all.map(messageMd)].join('\n\n---\n\n'));
-  ok ? announce(`대화 복사됨: 메시지 ${all.length}개`) : notify('복사 실패', '브라우저가 클립보드 쓰기를 막았습니다.');
+  ok ? announce(t('app.thread_copied', { n: all.length })) : notify(t('app.copy_failed'), t('app.clipboard_blocked'));
   const b = $('t-copy');
   if (ok && b) {
-    b.textContent = `✓ ${all.length}개 복사됨`;
-    setTimeout(() => (b.textContent = '대화 복사'), 2000);
+    b.textContent = t('app.copied_n', { n: all.length });
+    setTimeout(() => (b.textContent = t('app.copy_thread')), 2000);
   }
 }
-$('t-copy').addEventListener('click', () => copyThread().catch((e) => notify('복사 실패', e.message)));
+$('t-copy').addEventListener('click', () => copyThread().catch((e) => notify(t('app.copy_failed'), e.message)));
 
 // ───── 마크다운 ↔ 원문 (대화 단위 · 마스터 #477) ─────
 function syncMdToggle() {
   const plain = isPlain(S.cur);
   const b = $('t-md');
-  b.textContent = plain ? '마크다운 보기' : '원문 보기';
+  b.textContent = plain ? t('app.view_markdown') : t('app.view_raw');
   b.setAttribute('aria-pressed', plain ? 'true' : 'false');
-  b.title = plain ? '이 대화의 글을 마크다운으로 렌더링해 보기' : '이 대화의 글을 마크다운 기호 그대로(원문) 보기';
+  b.title = plain ? t('app.view_markdown_title') : t('app.view_raw_title');
 }
 $('t-face').addEventListener('click', () => toggleFace());
 $('face-tabs').addEventListener('click', (e) => {
@@ -1329,7 +1359,7 @@ $('t-md').addEventListener('click', () => {
   for (const b of document.querySelectorAll('#thread .msg .body')) if (typeof b._src === 'string') fillBody(b, b._src, plain);
   if (faceActive()) renderFace();
   syncMdToggle();
-  announce(plain ? '원문 보기' : '마크다운 보기');
+  announce(plain ? t('app.view_raw') : t('app.view_markdown'));
 });
 
 function jumpTo(seq) {
@@ -1369,13 +1399,13 @@ function renderReplyInfo() {
       'span',
       { class: 'reply-warn' },
       chip
-        ? `⚠ 답장만으로는 ${pname(a)}에게 전달되지 않습니다 — 수신 대상에서 고르세요 `
-        : `⚠ 답장만으로는 전달되지 않습니다 — ${pname(a)}는 이 대화의 수신 대상이 아닙니다 `,
+        ? t('app.reply_warn_chip', { name: pname(a) })
+        : t('app.reply_warn_nonmember', { name: pname(a) }),
     );
   }
   info.hidden = false;
   // 빈 값(null)은 넣지 않는다 — replaceChildren 은 null 을 «null» 글자로 그린다(마스터 #325)
-  info.replaceChildren(...[`↩ #${S.replyTo} 에 답장 `, el('button', { type: 'button', class: 'link', onclick: clearReply }, '취소'), warn ? el('br') : null, warn].filter((x) => x != null));
+  info.replaceChildren(...[t('app.replying_to', { seq: S.replyTo }), el('button', { type: 'button', class: 'link', onclick: clearReply }, t('app.cancel')), warn ? el('br') : null, warn].filter((x) => x != null));
 }
 
 // ───── 실행 상태: 메시지 행 · 대기 띠 · 보조 패널 ─────
@@ -1404,19 +1434,19 @@ const readAck = (r) => r.state === 'running' && (r.heartbeat_at != null || r.pro
 /** 경과 한 줄(첫 기계적 반응은 «✓ 읽음»으로 이미 보이므로 뺀다) + 그 뒤 지난 시간 */
 function progressEl(r) {
   if (!r.progress || /^읽었음 — /.test(r.progress)) return null;
-  return el('span', { class: 'progress', title: r.progress }, ` · 최근: ${r.progress} (`, el('span', { 'data-since': String(r.progress_at) }, dur(Date.now() - r.progress_at)), ' 전)');
+  return el('span', { class: 'progress', title: r.progress }, t('app.progress_recent', { text: r.progress }), el('span', { 'data-since': String(r.progress_at) }, dur(Date.now() - r.progress_at)), t('app.ago_close'));
 }
 function runLineEl(r) {
   const since = r.started_at ?? r.created_at;
   const err = r.error ? RUN_ERR[r.error] ?? r.error : '';
   const narrow = isNarrow();
-  const look = el('a', { href: runHref(r), class: 'look' }, narrow ? '상태 보기' : '상세');
+  const look = el('a', { href: runHref(r), class: 'look' }, narrow ? t('app.view_status') : t('app.details'));
   if (r.state === 'running' && r.cancel_requested_at)
     return el(
       'div',
       { class: 'runline cancel' },
-      el('span', { class: 'badge st-requested' }, '중단 요청됨'),
-      el('span', {}, `${pname(r.agent_id)} — 어댑터 중단 확인 대기 · 남은 `, el('span', { 'data-until': String(r.cancel_deadline_at) }, `${Math.max(0, Math.ceil((r.cancel_deadline_at - Date.now()) / 1000))}초`)),
+      el('span', { class: 'badge st-requested' }, t('app.cancel_requested')),
+      el('span', {}, t('app.awaiting_stop_ack_left', { name: pname(r.agent_id) }), el('span', { 'data-until': String(r.cancel_deadline_at) }, t('app.secs', { n: Math.max(0, Math.ceil((r.cancel_deadline_at - Date.now()) / 1000)) }))),
       look,
     );
   if (activeRun(r))
@@ -1427,12 +1457,12 @@ function runLineEl(r) {
       el(
         'span',
         {},
-        `${pname(r.agent_id)} ${readAck(r) ? '✓ 읽음 · 작업 중' : r.state === 'running' ? '응답 생성 중…' : '시작 대기'} · 경과 `,
+        t('app.run_active_line', { name: pname(r.agent_id), state: readAck(r) ? t('app.read_working') : r.state === 'running' ? t('app.generating') : t('app.waiting_start') }),
         el('span', { 'data-since': String(since) }, dur(Date.now() - since)),
         progressEl(r),
       ),
       // 좁은 화면은 한 줄 요약 + 상태 보기. 중단은 상세 화면에서만(기획서 3.1 표시)
-      narrow ? null : el('button', { type: 'button', class: 'danger', onclick: () => cancelRunAsk(r) }, '실행 취소'),
+      narrow ? null : el('button', { type: 'button', class: 'danger', onclick: () => cancelRunAsk(r) }, t('app.cancel_run')),
       look,
     );
   if (r.state === 'failed')
@@ -1440,7 +1470,7 @@ function runLineEl(r) {
       'div',
       { class: 'runline bad' },
       el('span', { class: 'badge st-failed' }, STATE.failed),
-      `${pname(r.agent_id)} — ${err || '실패'}${r.cancel_outcome === 'failed_first' ? ' · 취소 요청 중에 먼저 실패' : ''} · 자동 재실행하지 않습니다(다시 부르려면 새 메시지로)`,
+      t('app.run_failed_line', { name: pname(r.agent_id), err: err || t('app.failed'), extra: r.cancel_outcome === 'failed_first' ? t('app.failed_first_suffix') : '' }),
       look,
     );
   if (r.state === 'unknown')
@@ -1448,7 +1478,11 @@ function runLineEl(r) {
       'div',
       { class: 'runline bad' },
       el('span', { class: 'badge st-unknown' }, STATE.unknown),
-      `${pname(r.agent_id)} — ${r.error === 'cancel_ack_timeout' ? `어댑터가 ${Math.round(S.cancelAckMs / 1000)}초 안에 중단을 확인하지 않았습니다` : `실행 결과를 확인하지 못했습니다${err ? `(${err})` : ''}`}. 자동 재실행되지 않았습니다 · 마지막 확인 ${fmtHm(r.last_checked_at ?? r.finalized_at ?? r.ended_at)}`,
+      t('app.run_unknown_line', {
+        name: pname(r.agent_id),
+        reason: r.error === 'cancel_ack_timeout' ? t('app.ack_timeout_reason', { n: Math.round(S.cancelAckMs / 1000) }) : t('app.result_unknown_reason', { err: err ? `(${err})` : '' }),
+        time: fmtHm(r.last_checked_at ?? r.finalized_at ?? r.ended_at),
+      }),
       look,
     );
   if (r.state === 'cancelled')
@@ -1456,12 +1490,12 @@ function runLineEl(r) {
       'div',
       { class: 'runline cancel' },
       el('span', { class: 'badge st-cancelled' }, STATE.cancelled),
-      `${pname(r.agent_id)}${r.cancel_outcome && OUTCOME[r.cancel_outcome] ? ` — ${OUTCOME[r.cancel_outcome]}` : err ? ` — ${err}` : ''}${r.cancel_outcome === 'acked' ? `(어댑터 확인 ${fmtHm(r.stop_ack_at)})` : ''}`,
+      `${pname(r.agent_id)}${r.cancel_outcome && OUTCOME[r.cancel_outcome] ? ` — ${OUTCOME[r.cancel_outcome]}` : err ? ` — ${err}` : ''}${r.cancel_outcome === 'acked' ? t('app.adapter_ack_at', { time: fmtHm(r.stop_ack_at) }) : ''}`,
       look,
     );
   // 완료는 메시지 행에 반복하지 않는다(정책 3) — 답 글이 곧 결과. 다만 취소 요청 중 완료는 알린다(완료 우선 확정)
   if (r.cancel_outcome === 'completed_first')
-    return el('div', { class: 'runline cancel' }, el('span', { class: 'badge st-succeeded' }, '완료 우선 확정'), `${pname(r.agent_id)} — 취소 요청 중에 실행이 먼저 완료되었습니다(답은 그대로)`, look);
+    return el('div', { class: 'runline cancel' }, el('span', { class: 'badge st-succeeded' }, t('app.outcome_completed_first')), t('app.completed_first_line', { name: pname(r.agent_id) }), look);
   return null;
 }
 function renderRunLines() {
@@ -1480,24 +1514,24 @@ function renderRunLines() {
           el(
             'div',
             { class: 'runline' },
-            el('span', { class: `badge st-${x.status}` }, '전달 대기'),
-            `${pname(x.recipient_id)} — ${x.status === 'leased' ? '어댑터가 받는 중' : '아직 가져가지 않음'}`,
+            el('span', { class: `badge st-${x.status}` }, t('app.pending_delivery')),
+            `${pname(x.recipient_id)} — ${x.status === 'leased' ? t('app.adapter_receiving') : t('app.not_taken_yet')}`,
             fwdNoteEl(x),
             // 수동 전달의 되돌리기: 대기면 «전달 취소», 실행이 생겼으면 위 실행 줄의 «실행 취소»(중단)
-            x.forwarded_by && S.me?.is_master ? el('button', { type: 'button', class: 'danger', onclick: () => cancelForward(x) }, '전달 취소') : null,
+            x.forwarded_by && S.me?.is_master ? el('button', { type: 'button', class: 'danger', onclick: () => cancelForward(x) }, t('app.cancel_forward')) : null,
           ),
         );
-      else if (x.status === 'dead') lines.push(el('div', { class: 'runline bad' }, el('span', { class: 'badge st-dead' }, '전달 실패'), `${pname(x.recipient_id)} — 시도 횟수 초과`));
-      else if (x.status === 'cancelled') lines.push(el('div', { class: 'runline cancel' }, el('span', { class: 'badge st-cancelled' }, '전달 거둠'), `${pname(x.recipient_id)}${x.last_error ? ` — ${RUN_ERR[x.last_error] ?? x.last_error}` : ''}`));
+      else if (x.status === 'dead') lines.push(el('div', { class: 'runline bad' }, el('span', { class: 'badge st-dead' }, t('app.delivery_failed')), `${pname(x.recipient_id)} — ${t('app.too_many_attempts')}`));
+      else if (x.status === 'cancelled') lines.push(el('div', { class: 'runline cancel' }, el('span', { class: 'badge st-cancelled' }, t('app.delivery_withdrawn')), `${pname(x.recipient_id)}${x.last_error ? ` — ${RUN_ERR[x.last_error] ?? x.last_error}` : ''}`));
     }
     for (const h of (S.detail?.request_holds ?? []).filter((x) => x.request_seq === seq))
       lines.push(
         el(
           'div',
           { class: `runline ${h.acked_at ? 'cancel' : 'bad'}` },
-          el('span', { class: 'badge st-failed' }, h.kind === 'held' ? '요청 보류' : '요청 안 보냄'),
-          h.kind === 'held' ? `${pname(h.recipient_id)} — ${h.reason}` : `연쇄 상한 — ${pname(h.recipient_id)}에게 가지 않았습니다(마스터 확인 필요)`,
-          h.acked_at ? el('span', { class: 'muted small' }, ' · 확인함') : null,
+          el('span', { class: 'badge st-failed' }, h.kind === 'held' ? t('app.request_held') : t('app.request_not_sent')),
+          h.kind === 'held' ? `${pname(h.recipient_id)} — ${h.reason}` : t('app.chain_limit_line', { name: pname(h.recipient_id) }),
+          h.acked_at ? el('span', { class: 'muted small' }, t('app.acked_suffix')) : null,
         ),
       );
     const fb = forwardBar(seq);
@@ -1517,7 +1551,7 @@ function forwardCandidates(m) {
 function fwdNoteEl(x) {
   if (!x.forward_note) return null;
   const one = x.forward_note.replace(/\s+/g, ' ');
-  return el('span', { class: 'fwd-note-line small', title: x.forward_note }, ` · 메모: ${one.length > 80 ? one.slice(0, 80) + '…' : one}`);
+  return el('span', { class: 'fwd-note-line small', title: x.forward_note }, t('app.note_suffix', { text: one.length > 80 ? one.slice(0, 80) + '…' : one }));
 }
 function forwardBar(seq) {
   if (!S.me?.is_master || !S.detail) return null;
@@ -1536,7 +1570,7 @@ function forwardBar(seq) {
   for (const [rid, x] of sent) {
     if (!x.forwarded_by || x.run_state !== 'succeeded') continue;
     const r = S.runs.find((r) => r.id === x.run_id);
-    items.push(el('span', { class: 'small faint fwd-done' }, `→ ${pname(rid)}에게 전달됨`, r?.result_seq ? el('a', { href: `#m${r.result_seq}`, onclick: (e) => (e.preventDefault(), jumpTo(r.result_seq)) }, ` · 답 #${r.result_seq}`) : null, fwdNoteEl(x)));
+    items.push(el('span', { class: 'small faint fwd-done' }, t('app.forwarded_to', { name: pname(rid) }), r?.result_seq ? el('a', { href: `#m${r.result_seq}`, onclick: (e) => (e.preventDefault(), jumpTo(r.result_seq)) }, t('app.reply_seq_suffix', { seq: r.result_seq })) : null, fwdNoteEl(x)));
   }
   const btn = (rid, label, signalled) =>
     el(
@@ -1545,14 +1579,14 @@ function forwardBar(seq) {
         type: 'button',
         class: signalled ? 'fwd primary-soft' : 'fwd',
         disabled: paused || closed,
-        title: paused ? '새 호출 금지 중 — 풀어야 전달할 수 있습니다' : `#${seq}를 ${pname(rid)}에게 «이 글에 답하라»로 넘깁니다(새 메시지 없음)`,
+        title: paused ? t('app.paused_cannot_forward') : t('app.forward_title', { seq, name: pname(rid) }),
         'data-fwd': `${seq}:${rid}`,
         onclick: () => doForward(m, rid),
       },
       label,
     );
   // 에이전트가 끝줄 «→ 이름»으로 고른 대상은 바로 버튼으로
-  for (const rid of m.handoff_to ?? []) if (cands.includes(rid) && !sent.has(rid)) items.push(btn(rid, `${pname(rid)}에게 전달`, true));
+  for (const rid of m.handoff_to ?? []) if (cands.includes(rid) && !sent.has(rid)) items.push(btn(rid, t('app.forward_to', { name: pname(rid) }), true));
   // 신호가 없어도 마스터는 아무 대상에게나 넘길 수 있다(신호는 편의 · 권한은 마스터)
   const rest = cands.filter((rid) => !sent.has(rid) && !(m.handoff_to ?? []).includes(rid));
   if (rest.length) {
@@ -1561,12 +1595,12 @@ function forwardBar(seq) {
       el('button', { type: 'button', class: 'fwd ghost', disabled: paused || closed, 'aria-expanded': 'false', onclick: (e) => {
         menu.hidden = !menu.hidden;
         e.currentTarget.setAttribute('aria-expanded', String(!menu.hidden));
-      } }, '전달…'),
+      } }, t('app.forward_more')),
       menu,
     );
   }
   if (!items.length) return null;
-  if (paused && items.some((x) => x.tagName === 'BUTTON')) items.push(el('span', { class: 'small faint' }, '새 호출 금지 중'));
+  if (paused && items.some((x) => x.tagName === 'BUTTON')) items.push(el('span', { class: 'small faint' }, t('app.paused')));
   return el('div', { class: 'fwdbar' }, ...items);
 }
 // ───── 맥락 끌어오기(2026-10-13 마스터 #162) — 에이전트가 끝줄 «← 스레드»로 청하면 마스터가 눌러 그 에이전트에게 건넨다 ─────
@@ -1582,9 +1616,9 @@ function pullBar(seq) {
     return el(
       'div',
       { class: 'fwdbar pullcard' },
-      el('span', { class: 'small' }, `📥 가져온 맥락 — «${d.pulled_title ?? d.pulled_from}» #${d.pulled_from_seq}~#${d.pulled_to_seq} · ${d.pulled_count}개 → ${pname(d.recipient_id)}`),
+      el('span', { class: 'small' }, t('app.pulled_card', { title: d.pulled_title ?? d.pulled_from, from: d.pulled_from_seq, to: d.pulled_to_seq, n: d.pulled_count, name: pname(d.recipient_id) })),
       el('span', { class: 'small faint' }, ` · ${fmtHm(d.created_at)}`),
-      d.pulled_truncated ? el('span', { class: 'small', title: '받는 쪽 맥락 예산이 모자라 묶음 가운데를 잘라 실었습니다(머리 줄과 끝은 남김)' }, ' · ⚠ 가운데 잘림') : null,
+      d.pulled_truncated ? el('span', { class: 'small', title: t('app.pulled_truncated_title') }, t('app.pulled_truncated')) : null,
     );
   const paused = !!S.detail.thread.invoke_paused;
   const closed = S.detail.thread.status !== 'open' || !!S.detail.thread.deleted_at;
@@ -1597,12 +1631,12 @@ function pullBar(seq) {
         type: 'button',
         class: 'fwd primary-soft pull',
         disabled: paused || closed,
-        title: paused ? '새 호출 금지 중 — 풀어야 가져올 수 있습니다' : `${pname(m.author_id)}가 청한 다른 스레드의 맥락을 가져와 ${pname(m.author_id)}에게만 건넵니다(새 메시지 없음 · 한 번만 실림)`,
+        title: paused ? t('app.paused_cannot_pull') : t('app.pull_title', { name: pname(m.author_id) }),
         onclick: () => doPull(m),
       },
-      `${pullLabel(m.pull_req)} 맥락 가져오기`,
+      t('app.pull_btn', { label: pullLabel(m.pull_req) }),
     ),
-    paused ? el('span', { class: 'small faint' }, '새 호출 금지 중') : null,
+    paused ? el('span', { class: 'small faint' }, t('app.paused')) : null,
   );
 }
 async function doPull(m) {
@@ -1611,46 +1645,46 @@ async function doPull(m) {
   try {
     pv = await api('GET', path);
   } catch (e) {
-    await notify('가져올 수 없습니다', e.message);
+    await notify(t('app.cannot_pull'), e.message);
     return;
   }
-  const size = `«${pv.source.title}» #${pv.from_seq}~#${pv.to_seq} · ${pv.count}개 · 약 ${pv.est_tokens.toLocaleString()}토큰`;
+  const size = t('app.pull_size', { title: pv.source.title, from: pv.from_seq, to: pv.to_seq, n: pv.count, tokens: pv.est_tokens.toLocaleString(I18N.locale) });
   if (pv.level === 'over') {
-    await notify('받는 쪽 예산을 넘습니다', `${size} — ${pname(pv.recipient)}의 맥락 예산 ${pv.budget_tokens.toLocaleString()}토큰을 넘습니다. 에이전트에게 범위를 좁혀 달라고 하세요.`);
+    await notify(t('app.over_budget_title'), t('app.over_budget_text', { size, name: pname(pv.recipient), budget: pv.budget_tokens.toLocaleString(I18N.locale) }));
     return;
   }
   if (pv.level === 'warn' || pv.level === 'unknown') {
     const why =
       pv.level === 'warn'
-        ? `${pname(pv.recipient)} 예산 ${pv.budget_tokens.toLocaleString()}토큰의 1/3을 넘습니다 — 그만큼 이 스레드의 옛 대화가 밀려날 수 있습니다.`
-        : `${pname(pv.recipient)}의 맥락 예산을 서버가 모릅니다(예산을 신고하지 않는 어댑터).`;
-    const go = await ask({ title: '맥락 가져오기', text: `${size}\n${why}\n가져올까요?`, ok: '가져오기' });
+        ? t('app.pull_warn', { name: pname(pv.recipient), budget: pv.budget_tokens.toLocaleString(I18N.locale) })
+        : t('app.pull_budget_unknown', { name: pname(pv.recipient) });
+    const go = await ask({ title: t('app.pull_context'), text: t('app.pull_confirm', { size, why }), ok: t('app.pull') });
     if (!go) return;
   }
   try {
     await api('POST', path);
   } catch (e) {
-    await notify('가져오지 못했습니다', e.code === 'invoke_paused' ? '이 대화는 «새 호출 금지» 중입니다. 풀고 다시 누르세요.' : e.message);
+    await notify(t('app.pull_failed'), e.code === 'invoke_paused' ? t('app.paused_retry') : e.message);
   }
   await loadRuns().catch(() => {});
 }
 // 전달 메모(마스터 #740) — 누르면 확인 창에 선택 입력 칸. 비우면 옛 전달 그대로 · 쓰면 받는 에이전트에게 «마스터 전달 메모 · 지시»로 실린다
 const FORWARD_NOTE_MAX = 4000;
 async function doForward(m, rid) {
-  const note = el('textarea', { id: 'fwd-note', rows: 3, maxlength: FORWARD_NOTE_MAX, placeholder: '함께 전할 말(선택) — 비워 두면 글만 전달합니다', 'aria-label': '전달 메모(선택)' });
+  const note = el('textarea', { id: 'fwd-note', rows: 3, maxlength: FORWARD_NOTE_MAX, placeholder: t('app.fwd_note_ph'), 'aria-label': t('app.fwd_note_aria') });
   note.addEventListener('keydown', (e) => {
     // 여러 줄 입력 — Enter 는 줄바꿈, Ctrl/⌘+Enter 로 전달
     if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) (e.preventDefault(), $('confirm-ok').click());
     e.stopPropagation();
   });
-  const go = ask({ title: `${pname(rid)}에게 전달`, text: `#${m.seq}를 ${pname(rid)}에게 «이 글에 답하라»로 넘깁니다.`, ok: '전달', extra: el('label', { class: 'fwd-note' }, note) });
+  const go = ask({ title: t('app.forward_to', { name: pname(rid) }), text: t('app.forward_text', { seq: m.seq, name: pname(rid) }), ok: t('app.forward'), extra: el('label', { class: 'fwd-note' }, note) });
   note.focus();
   if (!(await go)) return;
   const body = note.value.trim() ? { recipient: rid, note: note.value.trim() } : { recipient: rid };
   try {
     await api('POST', `/api/threads/${encodeURIComponent(S.cur)}/messages/${m.seq}/forward`, body);
   } catch (e) {
-    await notify('전달하지 못했습니다', e.code === 'invoke_paused' ? '이 대화는 «새 호출 금지» 중입니다. 풀고 다시 누르세요.' : e.message);
+    await notify(t('app.forward_failed'), e.code === 'invoke_paused' ? t('app.paused_retry') : e.message);
   }
   await loadRuns().catch(() => {});
 }
@@ -1659,7 +1693,7 @@ async function cancelForward(x) {
     await api('POST', `/api/deliveries/${encodeURIComponent(x.id)}/cancel`);
   } catch (e) {
     // 그새 실행이 생겼다 — 실행 줄의 «실행 취소»(중단)로
-    await notify('전달을 거두지 못했습니다', e.code === 'has_run' ? '이미 실행이 시작됐습니다. 실행 줄의 «실행 취소»로 중단하세요.' : e.message);
+    await notify(t('app.cancel_forward_failed'), e.code === 'has_run' ? t('app.already_running') : e.message);
   }
   await loadRuns().catch(() => {});
 }
@@ -1668,11 +1702,11 @@ function renderWait() {
   for (const r of S.runs.filter(activeRun)) {
     const since = r.started_at ?? r.created_at;
     if (r.cancel_requested_at)
-      parts.push(el('span', {}, `${pname(r.agent_id)} 중단 확인 대기 — 남은 `, el('span', { 'data-until': String(r.cancel_deadline_at) }, `${Math.max(0, Math.ceil((r.cancel_deadline_at - Date.now()) / 1000))}초`)));
-    else parts.push(el('span', {}, `${pname(r.agent_id)} ${readAck(r) ? '✓ 읽음 · 작업 중' : r.state === 'running' ? '응답 대기 중' : '시작 대기 중'} — `, el('span', { 'data-since': String(since) }, dur(Date.now() - since)), ' 경과'));
+      parts.push(el('span', {}, t('app.wait_stop_ack', { name: pname(r.agent_id) }), el('span', { 'data-until': String(r.cancel_deadline_at) }, t('app.secs', { n: Math.max(0, Math.ceil((r.cancel_deadline_at - Date.now()) / 1000)) }))));
+    else parts.push(el('span', {}, t('app.wait_line', { name: pname(r.agent_id), state: readAck(r) ? t('app.read_working') : r.state === 'running' ? t('app.waiting_reply') : t('app.waiting_to_start') }), el('span', { 'data-since': String(since) }, dur(Date.now() - since)), t('app.elapsed_suffix')));
   }
   const w = waitingDeliveries();
-  if (w.length) parts.push(el('span', {}, `전달 대기 ${w.length}건(${[...new Set(w.map((x) => pname(x.recipient_id)))].join(', ')})`));
+  if (w.length) parts.push(el('span', {}, t('app.pending_deliveries_n', { n: w.length, names: [...new Set(w.map((x) => pname(x.recipient_id)))].join(', ') })));
   const b = $('wait-banner');
   b.hidden = parts.length === 0;
   b.replaceChildren(...parts.flatMap((p, i) => (i ? [' · ', p] : [p])));
@@ -1694,38 +1728,38 @@ function runLi(r) {
       { class: 'r1' },
       el('span', { class: `badge st-${runStateKey(r)}` }, stateLabel(r)),
       el('b', {}, pname(r.agent_id)),
-      el('span', { class: 'faint' }, `${r.generation}세대`),
+      el('span', { class: 'faint' }, t('app.gen_n', { n: r.generation })),
       el('span', { class: 'spacer' }),
-      el('a', { href: runHref(r), class: 'look' }, isNarrow() ? '상태 보기' : '상세'),
+      el('a', { href: runHref(r), class: 'look' }, isNarrow() ? t('app.view_status') : t('app.details')),
     ),
-    el('div', { class: 'muted' }, `원인 #${r.trigger_seq}${trig ? ` «${trig.body.slice(0, 40)}${trig.body.length > 40 ? '…' : ''}»` : ''}`),
+    el('div', { class: 'muted' }, t('app.cause', { seq: r.trigger_seq, snippet: trig ? ` «${trig.body.slice(0, 40)}${trig.body.length > 40 ? '…' : ''}»` : '' })),
     el(
       'div',
       { class: 'faint' },
       activeRun(r)
-        ? ['시작 ', fmtHm(since), ' · 경과 ', el('span', { 'data-since': String(since) }, dur(Date.now() - since)), progressEl(r)]
-        : [`${fmtHm(r.created_at)} → ${fmtHm(r.ended_at)}`, r.ended_at && r.started_at ? ` · 소요 ${dur(r.ended_at - r.started_at)}` : ''],
+        ? [t('app.start_prefix'), fmtHm(since), t('app.elapsed_mid'), el('span', { 'data-since': String(since) }, dur(Date.now() - since)), progressEl(r)]
+        : [`${fmtHm(r.created_at)} → ${fmtHm(r.ended_at)}`, r.ended_at && r.started_at ? t('app.took_suffix', { d: dur(r.ended_at - r.started_at) }) : ''],
     ),
     r.cancel_outcome
       ? el(
           'div',
           { class: 'muted' },
-          `중단 결과: ${OUTCOME[r.cancel_outcome] ?? r.cancel_outcome}`,
-          r.cancel_outcome === 'requested' ? [' · 남은 ', el('span', { 'data-until': String(r.cancel_deadline_at) }, '')] : null,
+          t('app.cancel_result', { x: OUTCOME[r.cancel_outcome] ?? r.cancel_outcome }),
+          r.cancel_outcome === 'requested' ? [t('app.remaining_mid'), el('span', { 'data-until': String(r.cancel_deadline_at) }, '')] : null,
         )
       : null,
     err && (r.state !== 'cancelled' || !r.cancel_outcome) ? el('div', { class: r.state === 'cancelled' ? 'muted' : 'err' }, err) : null,
-    r.state === 'unknown' ? el('div', { class: 'muted' }, '자동 재실행되지 않았습니다 — 필요하면 새 메시지로 다시 부르세요') : null,
-    activeRun(r) && !r.cancel_requested_at && !isNarrow() ? el('button', { type: 'button', class: 'danger', onclick: () => cancelRunAsk(r) }, '이 실행 취소') : null,
+    r.state === 'unknown' ? el('div', { class: 'muted' }, t('app.not_retried')) : null,
+    activeRun(r) && !r.cancel_requested_at && !isNarrow() ? el('button', { type: 'button', class: 'danger', onclick: () => cancelRunAsk(r) }, t('app.cancel_this_run')) : null,
   );
 }
 // ───── 보류된 요청(마스터 #352) — 받은 에이전트가 «보류: 사유»로 남겼거나 연쇄 상한에 걸려 서버가 만들지 않은 요청 ─────
 function openHolds() {
   return (S.detail?.request_holds ?? []).filter((h) => !h.acked_at);
 }
-const HOLD_KIND = { held: '보류', chain_limit: '연쇄 상한' };
+const HOLD_KIND = { held: t('app.hold'), chain_limit: t('app.chain_limit') };
 function holdLi(h) {
-  const reason = h.kind === 'chain_limit' ? `마스터 글 뒤 요청이 상한에 닿아 보내지 않았습니다 — 이어 가려면 이 글을 «전달»하거나 스레드에 글을 쓰세요` : h.reason;
+  const reason = h.kind === 'chain_limit' ? t('app.chain_limit_reason') : h.reason;
   return el(
     'li',
     { class: h.acked_at ? '' : 'hold-open', 'data-hold': h.id },
@@ -1736,37 +1770,37 @@ function holdLi(h) {
       el('b', {}, `${pname(h.requester_id)} → ${pname(h.recipient_id)}`),
       h.request_seq ? el('a', { href: `#m${h.request_seq}`, onclick: (e) => (e.preventDefault(), jumpTo(h.request_seq)) }, `#${h.request_seq}`) : null,
     ),
-    el('div', { class: 'hold-reason' }, `사유: ${reason}`),
+    el('div', { class: 'hold-reason' }, t('app.reason', { reason })),
     h.note ? el('div', { class: 'muted small hold-note' }, h.note.length > 300 ? `${h.note.slice(0, 300)}…` : h.note) : null,
-    el('div', { class: 'muted small' }, `${fmtTime(h.created_at)}${h.acked_at ? ` · 확인 ${fmtTime(h.acked_at)}` : ''}`),
-    h.acked_at ? null : el('button', { type: 'button', class: 'hold-ack', onclick: () => ackHold(h) }, '확인함'),
+    el('div', { class: 'muted small' }, `${fmtTime(h.created_at)}${h.acked_at ? t('app.acked_at_suffix', { time: fmtTime(h.acked_at) }) : ''}`),
+    h.acked_at ? null : el('button', { type: 'button', class: 'hold-ack', onclick: () => ackHold(h) }, t('app.ack')),
   );
 }
 async function ackHold(h) {
   try {
     await api('POST', `/api/request-holds/${encodeURIComponent(h.id)}/ack`);
-    announce('보류된 요청을 확인했습니다');
+    announce(t('app.hold_acked'));
     await loadDetail();
   } catch (e) {
-    notify('확인 실패', e.message);
+    notify(t('app.ack_failed'), e.message);
   }
 }
 function renderHolds() {
   const hs = S.detail?.request_holds ?? [];
-  $('holds-count').textContent = hs.length ? `(확인 안 함 ${openHolds().length} · 최근 ${hs.length})` : '';
-  $('holds').replaceChildren(...(hs.length ? hs.slice(0, 30).map(holdLi) : [el('li', { class: 'empty' }, '없음')]));
+  $('holds-count').textContent = hs.length ? t('app.holds_count', { open: openHolds().length, n: hs.length }) : '';
+  $('holds').replaceChildren(...(hs.length ? hs.slice(0, 30).map(holdLi) : [el('li', { class: 'empty' }, t('app.none'))]));
 }
 function renderRunsTab() {
   renderHolds();
-  const t = S.detail?.thread;
+  const th = S.detail?.thread;
   const active = S.runs.filter(activeRun).length;
   const unknown = S.runs.filter((r) => r.state === 'unknown').length;
-  $('runs-count').textContent = `(진행 ${active} · 미확인 ${unknown} · 최근 ${S.runs.length})`;
-  $('runs-all').href = t ? `#runs?thread=${encodeURIComponent(t.id)}&since=` : '#runs';
-  $('btn-stop-new').hidden = !t || t.invoke_paused;
-  $('btn-resume').hidden = !t || !t.invoke_paused;
-  $('paused-note').hidden = !t?.invoke_paused;
-  $('runs').replaceChildren(...(S.runs.length ? S.runs.slice(0, 50).map(runLi) : [el('li', { class: 'empty' }, '이 대화의 실행이 아직 없습니다')]));
+  $('runs-count').textContent = t('app.runs_count', { active, unknown, n: S.runs.length });
+  $('runs-all').href = th ? `#runs?thread=${encodeURIComponent(th.id)}&since=` : '#runs';
+  $('btn-stop-new').hidden = !th || th.invoke_paused;
+  $('btn-resume').hidden = !th || !th.invoke_paused;
+  $('paused-note').hidden = !th?.invoke_paused;
+  $('runs').replaceChildren(...(S.runs.length ? S.runs.slice(0, 50).map(runLi) : [el('li', { class: 'empty' }, t('app.no_runs'))]));
   const w = waitingDeliveries();
   $('deliveries').replaceChildren(
     ...(w.length
@@ -1774,12 +1808,12 @@ function renderRunsTab() {
           el(
             'li',
             {},
-            el('div', { class: 'r1' }, el('span', { class: `badge st-${x.status}` }, x.status === 'leased' ? '받는 중' : '전달 대기'), el('b', {}, pname(x.recipient_id))),
-            el('div', { class: 'muted' }, `메시지 #${x.message_seq} · 시도 ${x.attempts}`),
-            el('button', { type: 'button', class: 'danger', onclick: () => cancelDeliveryAsk({ ...x, thread_id: S.cur }) }, '전달 취소'),
+            el('div', { class: 'r1' }, el('span', { class: `badge st-${x.status}` }, x.status === 'leased' ? t('app.receiving') : t('app.pending_delivery')), el('b', {}, pname(x.recipient_id))),
+            el('div', { class: 'muted' }, t('app.delivery_meta', { seq: x.message_seq, n: x.attempts })),
+            el('button', { type: 'button', class: 'danger', onclick: () => cancelDeliveryAsk({ ...x, thread_id: S.cur }) }, t('app.cancel_forward')),
           ),
         )
-      : [el('li', { class: 'empty' }, '없음')]),
+      : [el('li', { class: 'empty' }, t('app.none'))]),
   );
 }
 // ───── 스레드 정리: 보관·숨김·휴지통·영구 삭제(마스터만 · 아래 분기까지 묶어 걸린다) ─────
@@ -1791,102 +1825,102 @@ function descendants(id) {
   walk(id);
   return out;
 }
-function renderStateMenu(t) {
-  const st = stateOf(t);
-  $('t-menu').hidden = t.kind === 'room';
+function renderStateMenu(th) {
+  const st = stateOf(th);
+  $('t-menu').hidden = th.kind === 'room';
   $('t-menu').open = false;
   const trash = st === 'trash';
   $('st-rename').hidden = trash;
-  $('st-archive').hidden = trash || t.status === 'archived';
-  $('st-unarchive').hidden = trash || t.status !== 'archived';
-  $('st-hide').hidden = trash || !!t.hidden;
-  $('st-unhide').hidden = trash || !t.hidden;
+  $('st-archive').hidden = trash || th.status === 'archived';
+  $('st-unarchive').hidden = trash || th.status !== 'archived';
+  $('st-hide').hidden = trash || !!th.hidden;
+  $('st-unhide').hidden = trash || !th.hidden;
   $('st-trash').hidden = trash;
   $('st-restore').hidden = !trash;
   $('st-purge').hidden = !trash;
   const note = $('t-state-note');
   const msg = trash
-    ? `휴지통에 있는 대화입니다(${fmtTime(t.deleted_at)}) — 에이전트에게는 보이지 않고 새 글을 쓸 수 없습니다. «정리»에서 복구하거나 영구 삭제합니다.`
-    : t.status === 'archived'
-      ? '보관된 대화입니다 — 읽기 전용이라 새 글·에이전트 호출을 할 수 없습니다. «정리 → 보관 해제»로 되돌립니다.'
-      : t.hidden
-        ? '목록에서 숨긴 대화입니다 — 동작은 그대로입니다. 목록 필터 «숨김»에서 찾습니다.'
+    ? t('app.note_trash', { time: fmtTime(th.deleted_at) })
+    : th.status === 'archived'
+      ? t('app.note_archived')
+      : th.hidden
+        ? t('app.note_hidden')
         : '';
   note.textContent = msg;
   note.hidden = !msg;
 }
 const STATE_ERR = {
-  runs_active: '실행 중인 에이전트 작업이 있습니다 — 보조 패널의 «현재 실행 취소»나 완료를 기다린 뒤 다시 하세요.',
-  room_locked: '메인 채팅방은 이름 바꾸기·보관·숨김·삭제를 할 수 없습니다.',
-  thread_deleted: '휴지통에 있는 대화는 복구만 할 수 있습니다.',
-  not_in_trash: '먼저 휴지통에 넣어야 영구 삭제할 수 있습니다.',
-  descendants_not_in_trash: '아래 분기 중 휴지통 밖에 있는 스레드가 있습니다 — 그것까지 휴지통에 넣은 뒤 다시 하세요.',
-  confirm_mismatch: '확인 칸의 제목이 맞지 않습니다.',
+  runs_active: t('app.stateerr_runs_active'),
+  room_locked: t('app.stateerr_room_locked'),
+  thread_deleted: t('app.stateerr_thread_deleted'),
+  not_in_trash: t('app.stateerr_not_in_trash'),
+  descendants_not_in_trash: t('app.stateerr_descendants_not_in_trash'),
+  confirm_mismatch: t('app.stateerr_confirm_mismatch'),
 };
 const STATE_ASK = {
-  archive: { title: '보관', ok: '보관', text: '읽기 전용으로 바꿉니다. 새 글과 에이전트 호출을 막고, 아직 나가지 않은 전달은 거둡니다. 언제든 «보관 해제»로 되돌립니다.' },
-  hide: { title: '목록에서 숨기기', ok: '숨기기', text: '목록에서만 빠집니다. 대화·에이전트 동작은 그대로이고 필터 «숨김»에서 다시 찾습니다.' },
-  trash: { title: '휴지통으로', ok: '휴지통으로', danger: true, text: '에이전트에게서 사라지고 새 글을 쓸 수 없습니다. 아직 나가지 않은 전달은 거둡니다. 필터 «휴지통»에서 복구할 수 있습니다(자동으로 비우지 않습니다).' },
+  archive: { title: t('app.archive'), ok: t('app.archive'), text: t('app.archive_text') },
+  hide: { title: t('app.hide_title'), ok: t('app.hide'), text: t('app.hide_text') },
+  trash: { title: t('app.to_trash'), ok: t('app.to_trash'), danger: true, text: t('app.trash_text') },
 };
 async function setStateAsk(action) {
-  const t = S.detail?.thread;
-  if (!t) return;
+  const th = S.detail?.thread;
+  if (!th) return;
   $('t-menu').open = false;
-  const d = descendants(t.id);
+  const d = descendants(th.id);
   const q = STATE_ASK[action];
   if (q) {
-    const ok = await ask({ ...q, text: `«${t.title}»${d.length ? `와 아래 분기 ${d.length}개` : ''}: ${q.text}` });
+    const ok = await ask({ ...q, text: t('app.state_ask_text', { title: th.title, branches: d.length ? t('app.and_branches', { n: d.length }) : '', text: q.text }) });
     if (!ok) return;
   }
   try {
-    await api('POST', `/api/threads/${t.id}/state`, { action });
+    await api('POST', `/api/threads/${th.id}/state`, { action });
   } catch (e) {
-    return notify('실패', STATE_ERR[e.code] ?? e.message);
+    return notify(t('app.failed_title'), STATE_ERR[e.code] ?? e.message);
   }
   await Promise.all([loadDetail(), loadThreads()]);
 }
 for (const a of ['archive', 'unarchive', 'hide', 'unhide', 'trash', 'restore']) $(`st-${a}`).addEventListener('click', () => setStateAsk(a));
 $('st-rename').addEventListener('click', async () => {
-  const t = S.detail?.thread;
-  if (!t) return;
+  const th = S.detail?.thread;
+  if (!th) return;
   $('t-menu').open = false;
-  const input = el('input', { type: 'text', id: 'rename-input', maxlength: '200', autocomplete: 'off', 'aria-label': '새 이름', value: t.title });
+  const input = el('input', { type: 'text', id: 'rename-input', maxlength: '200', autocomplete: 'off', 'aria-label': t('app.new_name'), value: th.title });
   input.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.isComposing) (e.preventDefault(), $('confirm-ok').click());
   });
-  const asked = ask({ title: '이름 바꾸기', ok: '바꾸기', text: `«${t.title}»의 새 이름. 에이전트는 다음 턴부터 새 이름을 봅니다.`, extra: el('label', { class: 'small' }, '새 이름 ', input) });
+  const asked = ask({ title: t('app.rename'), ok: t('app.rename_ok'), text: t('app.rename_text', { title: th.title }), extra: el('label', { class: 'small' }, t('app.new_name_label'), input) });
   input.focus(); // ask 는 «확인»에 초점을 둔다 — 이름 칸으로 옮긴다
   input.select();
   const ok = await asked;
   const title = input.value.trim();
-  if (!ok || !title || title === t.title) return;
+  if (!ok || !title || title === th.title) return;
   try {
-    await api('POST', `/api/threads/${t.id}/rename`, { title });
+    await api('POST', `/api/threads/${th.id}/rename`, { title });
   } catch (e) {
-    return notify('실패', STATE_ERR[e.code] ?? e.message);
+    return notify(t('app.failed_title'), STATE_ERR[e.code] ?? e.message);
   }
   await Promise.all([loadDetail(), loadThreads()]);
-  announce(`이름을 «${title}»로 바꿨습니다`);
+  announce(t('app.renamed', { title }));
 });
 $('st-purge').addEventListener('click', async () => {
-  const t = S.detail?.thread;
-  if (!t) return;
+  const th = S.detail?.thread;
+  if (!th) return;
   $('t-menu').open = false;
-  const d = descendants(t.id);
-  const input = el('input', { type: 'text', id: 'purge-confirm', autocomplete: 'off', 'aria-label': '확인용 제목', placeholder: t.title });
-  const extra = el('label', { class: 'small' }, '확인하려면 제목을 그대로 입력하세요: ', el('b', {}, t.title), input);
+  const d = descendants(th.id);
+  const input = el('input', { type: 'text', id: 'purge-confirm', autocomplete: 'off', 'aria-label': t('app.confirm_title_aria'), placeholder: th.title });
+  const extra = el('label', { class: 'small' }, t('app.purge_type_title'), el('b', {}, th.title), input);
   const ok = await ask({
-    title: '영구 삭제',
+    title: t('app.purge'),
     danger: true,
-    ok: '영구 삭제',
-    text: `«${t.title}»${d.length ? `와 아래 분기 ${d.length}개` : ''}의 메시지·첨부 파일·실행 기록을 지웁니다. 되돌릴 수 없습니다. 감사 기록에는 삭제했다는 사실만 남습니다.`,
+    ok: t('app.purge'),
+    text: t('app.purge_text', { title: th.title, branches: d.length ? t('app.and_branches', { n: d.length }) : '' }),
     extra,
   });
   if (!ok) return;
   try {
-    await api('POST', `/api/threads/${t.id}/purge`, { confirm: input.value });
+    await api('POST', `/api/threads/${th.id}/purge`, { confirm: input.value });
   } catch (e) {
-    return notify('실패', STATE_ERR[e.code] ?? e.message);
+    return notify(t('app.failed_title'), STATE_ERR[e.code] ?? e.message);
   }
   await loadThreads();
   location.hash = room()?.id ?? '';
@@ -1894,53 +1928,61 @@ $('st-purge').addEventListener('click', async () => {
 
 $('btn-stop-new').addEventListener('click', async () => {
   const ok = await ask({
-    title: '새 호출 금지',
-    text: '이 대화에 새 에이전트 호출을 만들지 않습니다. 아직 나가지 않은 전달과 시작 전 실행도 거둡니다. 이미 도는 실행은 계속됩니다. 메시지는 계속 저장됩니다.',
-    ok: '새 호출 금지',
+    title: t('app.pause_calls'),
+    text: t('app.pause_calls_text'),
+    ok: t('app.pause_calls'),
   });
   if (!ok) return;
-  await api('POST', `/api/threads/${S.cur}/stop`, { mode: 'stop_new' }).catch((e) => notify('실패', e.message));
+  await api('POST', `/api/threads/${S.cur}/stop`, { mode: 'stop_new' }).catch((e) => notify(t('app.failed_title'), e.message));
   await Promise.all([loadDetail(), loadRuns(), loadThreads()]);
 });
 $('btn-resume').addEventListener('click', async () => {
-  await api('POST', `/api/threads/${S.cur}/resume`).catch((e) => notify('실패', e.message));
+  await api('POST', `/api/threads/${S.cur}/resume`).catch((e) => notify(t('app.failed_title'), e.message));
   await Promise.all([loadDetail(), loadThreads()]);
 });
 $('btn-cancel-current').addEventListener('click', () => cancelCurrentAsk());
 async function cancelCurrentAsk() {
   const ok = await ask({
-    title: '현재 실행 취소',
-    text: `이 대화에서 아직 안 나간 전달은 거두고 대기 중인 실행은 지금 취소하며, 실행 중인 것은 어댑터에 중단을 요청합니다(${Math.round(S.cancelAckMs / 1000)}초 안에 확인이 없으면 ‘상태 미확인’). 완료된 실행은 되돌릴 수 없습니다.`,
-    ok: '모두 취소',
+    title: t('app.cancel_current'),
+    text: t('app.cancel_current_text', { n: Math.round(S.cancelAckMs / 1000) }),
+    ok: t('app.cancel_all'),
     danger: true,
   });
   if (!ok) return;
-  const r = await api('POST', `/api/threads/${S.cur}/stop`, { mode: 'cancel_current' }).catch((e) => (notify('실패', e.message), null));
-  if (r) announce(`전달 거둠 ${r.withdrawn_deliveries ?? 0}건 · 대기 중 취소 ${r.cancelled_runs.length}건 · 중단 요청 ${(r.cancel_requested_runs ?? []).length}건`);
+  const r = await api('POST', `/api/threads/${S.cur}/stop`, { mode: 'cancel_current' }).catch((e) => (notify(t('app.failed_title'), e.message), null));
+  if (r) announce(t('app.cancel_current_done', { w: r.withdrawn_deliveries ?? 0, c: r.cancelled_runs.length, r: (r.cancel_requested_runs ?? []).length }));
   await loadRuns();
 }
 
 // ───── 세션 ─────
 /** 맥락 크기 표시(마스터 #283 C) — 1만 토큰 단위로 */
-const ctxK = (n) => (n >= 10000 ? `${(n / 10000).toFixed(n >= 100000 ? 0 : 1)}만 토큰` : `${n.toLocaleString()} 토큰`);
+const ctxK = (n) =>
+  t('app.tokens', {
+    n:
+      n < 10000
+        ? n.toLocaleString(I18N.locale)
+        : I18N.lang === 'ko'
+          ? `${(n / 10000).toFixed(n >= 100000 ? 0 : 1)}만`
+          : new Intl.NumberFormat(I18N.locale, { notation: 'compact', maximumFractionDigits: 1 }).format(n),
+  });
 function sizeLine(cur, policy) {
   const m = cur?.metrics;
-  if (!m) return '측정 전';
+  if (!m) return t('app.not_measured');
   const parts = [];
   const tokPct = policy?.tokens && m.ctx_tokens != null ? m.ctx_tokens / policy.tokens : 0;
   const repPct = policy?.replies ? m.replies / policy.replies : 0;
-  parts.push(m.ctx_tokens != null ? `약 ${ctxK(m.ctx_tokens)}` : '크기 보고 없음');
-  parts.push(`답 ${m.replies}개`);
-  const rule = [policy?.tokens ? `${ctxK(policy.tokens)}` : null, policy?.replies ? `답 ${policy.replies}개` : null].filter(Boolean).join(' 또는 ');
+  parts.push(m.ctx_tokens != null ? t('app.approx', { x: ctxK(m.ctx_tokens) }) : t('app.no_size_report'));
+  parts.push(t('app.replies_n', { n: m.replies }));
+  const rule = [policy?.tokens ? `${ctxK(policy.tokens)}` : null, policy?.replies ? t('app.replies_n', { n: policy.replies }) : null].filter(Boolean).join(t('app.or_sep'));
   const near = Math.max(tokPct, repPct);
-  return el('span', { class: near >= 0.8 ? 'alertish' : '' }, `${parts.join(' · ')}${rule ? ` — 자동 교체 기준 ${rule}${near >= 1 ? ' (다음 호출 때 교체)' : near >= 0.8 ? ' (곧 교체)' : ''}` : ''}`);
+  return el('span', { class: near >= 0.8 ? 'alertish' : '' }, `${parts.join(' · ')}${rule ? `${t('app.auto_rotate_rule', { rule })}${near >= 1 ? t('app.rotate_next') : near >= 0.8 ? t('app.rotate_soon') : ''}` : ''}`);
 }
 function renderSessionsTab() {
   const d = S.detail;
   const box = $('sessions');
   if (!d) return box.replaceChildren();
   const agents = d.members.filter((m) => m.kind === 'agent');
-  if (!agents.length) return box.replaceChildren(el('p', { class: 'muted small' }, '이 대화에 멤버 에이전트가 없습니다.'));
+  if (!agents.length) return box.replaceChildren(el('p', { class: 'muted small' }, t('app.no_member_agents')));
   box.replaceChildren(
     ...agents.map((a) => {
       const all = d.sessions.filter((s) => s.agent_id === a.participant_id).sort((x, y) => y.generation - x.generation);
@@ -1949,27 +1991,27 @@ function renderSessionsTab() {
       return el(
         'div',
         { class: 'sess' },
-        el('div', { class: 's1' }, el('b', {}, a.name), cur ? el('span', { class: 'pill' }, `활성 · ${cur.generation}세대`) : el('span', { class: 'pill' }, '세션 없음'), el('span', { class: 'spacer' }), el('button', { type: 'button', onclick: () => rotateAsk(a, cur) }, '세션 교체')),
+        el('div', { class: 's1' }, el('b', {}, a.name), cur ? el('span', { class: 'pill' }, `${t('app.active')} · ${t('app.gen_n', { n: cur.generation })}`) : el('span', { class: 'pill' }, t('app.no_session')), el('span', { class: 'spacer' }), el('button', { type: 'button', onclick: () => rotateAsk(a, cur) }, t('app.rotate_session'))),
         cur
           ? el(
               'dl',
               { class: 'kv' },
-              kv('실제 모델', cur.actual_model ?? '아직 기록 없음(첫 실행 뒤 채워짐)'),
-              kv('런타임', cur.runtime ?? '기록 없음'),
-              kv('설정 버전', cur.config_version ?? '기록 없음'),
-              kv('세대 경계', cur.base_seq ? `#${cur.base_seq} 뒤부터 원문` : '대화 처음부터'),
-              kv('마지막 넘긴 메시지', cur.last_delivered_seq ? `#${cur.last_delivered_seq}` : '없음'),
-              kv('시작', fmtTime(cur.created_at)),
-              kv('맥락 사용량', sizeLine(cur, d.rotate_policy)),
-              cur.carry ? kv('이어받기', `최근 글 원문 + 사서 요약으로 시작한 세대`) : null,
+              kv(t('app.actual_model'), cur.actual_model ?? t('app.not_recorded_yet')),
+              kv(t('app.runtime'), cur.runtime ?? t('app.not_recorded')),
+              kv(t('app.config_version'), cur.config_version ?? t('app.not_recorded')),
+              kv(t('app.gen_boundary'), cur.base_seq ? t('app.raw_after', { seq: cur.base_seq }) : t('app.from_start')),
+              kv(t('app.last_delivered'), cur.last_delivered_seq ? `#${cur.last_delivered_seq}` : t('app.none')),
+              kv(t('app.start'), fmtTime(cur.created_at)),
+              kv(t('app.ctx_usage'), sizeLine(cur, d.rotate_policy)),
+              cur.carry ? kv(t('app.carry'), t('app.carry_desc')) : null,
             )
-          : el('p', { class: 'muted small' }, '첫 호출 때 1세대가 열립니다.'),
+          : el('p', { class: 'muted small' }, t('app.first_gen_note')),
         all.length
           ? el(
               'table',
               { class: 'hist' },
-              el('thead', {}, el('tr', {}, el('th', {}, '세대'), el('th', {}, '상태'), el('th', {}, '사유'), el('th', {}, '시작'), el('th', {}, '끝'))),
-              el('tbody', {}, ...all.map((s) => el('tr', {}, el('td', {}, String(s.generation)), el('td', {}, s.status === 'active' ? '활성' : '종료'), el('td', {}, s.reason ?? ''), el('td', {}, fmtHm(s.created_at)), el('td', {}, fmtHm(s.ended_at))))),
+              el('thead', {}, el('tr', {}, el('th', {}, t('app.generation')), el('th', {}, t('app.state')), el('th', {}, t('app.reason_h')), el('th', {}, t('app.start')), el('th', {}, t('app.end')))),
+              el('tbody', {}, ...all.map((s) => el('tr', {}, el('td', {}, String(s.generation)), el('td', {}, s.status === 'active' ? t('app.active') : t('app.ended')), el('td', {}, s.reason ?? ''), el('td', {}, fmtHm(s.created_at)), el('td', {}, fmtHm(s.ended_at))))),
             )
           : null,
       );
@@ -1981,14 +2023,14 @@ async function rotateAsk(a, cur) {
     'select',
     { id: 'rotate-kind' },
     ...[
-      ['오류', '세션 오류'],
-      ['모델 변경', '모델 변경'],
-      ['설정 변경', '설정 변경'],
-      ['포화', '맥락 포화'],
-      ['기타', '기타'],
-    ].map(([v, t]) => el('option', { value: v }, t)),
+      ['오류', t('app.rot_error')],
+      ['모델 변경', t('app.rot_model')],
+      ['설정 변경', t('app.rot_config')],
+      ['포화', t('app.rot_full')],
+      ['기타', t('app.rot_other')],
+    ].map(([v, label]) => el('option', { value: v }, label)),
   );
-  const memo = el('input', { id: 'rotate-memo', placeholder: '메모(선택)', maxlength: '300' });
+  const memo = el('input', { id: 'rotate-memo', placeholder: t('app.memo_optional'), maxlength: '300' });
   // 이어받기(마스터 #283 C): 맥락이 무거워 바꾸는 것이면 최근 글 원문 + 사서 요약을 들고 간다. 오류·모델 변경이면 빈 손이 낫다
   const carry = el('input', { type: 'checkbox', id: 'rotate-carry', checked: true });
   kindSel.value = '포화';
@@ -1997,19 +2039,19 @@ async function rotateAsk(a, cur) {
   const extra = el(
     'div',
     {},
-    cur ? el('p', { class: 'small' }, `지금 맥락: `, sizeLine(cur, S.detail?.rotate_policy)) : null,
-    el('div', { class: 'row wrap' }, el('label', { class: 'small' }, '교체 사유 ', kindSel), memo),
-    el('label', { class: 'small' }, carry, ` 이어받기 — 최근 글 ${n}개 원문 + 사서 요약(있으면)을 새 세대에 싣는다`),
+    cur ? el('p', { class: 'small' }, t('app.ctx_now'), sizeLine(cur, S.detail?.rotate_policy)) : null,
+    el('div', { class: 'row wrap' }, el('label', { class: 'small' }, t('app.rotate_reason'), kindSel), memo),
+    el('label', { class: 'small' }, carry, t('app.carry_label', { n })),
   );
   const ok = await ask({
-    title: `${a.name} 세션 교체`,
-    text: `${cur ? `${cur.generation}세대를 끝내고 ${cur.generation + 1}세대` : '새 세대'}를 엽니다. 이 에이전트의 진행 중 실행은 취소됩니다. 이어받기를 끄면 새 세대는 이전 대화 원문을 받지 않습니다.`,
-    ok: '세션 교체',
+    title: t('app.rotate_title', { name: a.name }),
+    text: cur ? t('app.rotate_text_cur', { g: cur.generation, next: cur.generation + 1 }) : t('app.rotate_text_new'),
+    ok: t('app.rotate_session'),
     extra,
   });
   if (!ok) return;
   const reason = memo.value.trim() ? `${kindSel.value}: ${memo.value.trim()}` : kindSel.value;
-  await api('POST', `/api/threads/${S.cur}/sessions/rotate`, { agent_id: a.participant_id, reason, carry: carry.checked }).catch((e) => notify('세션 교체 실패', e.message));
+  await api('POST', `/api/threads/${S.cur}/sessions/rotate`, { agent_id: a.participant_id, reason, carry: carry.checked }).catch((e) => notify(t('app.rotate_failed'), e.message));
   await Promise.all([loadDetail(), loadRuns()]);
 }
 
@@ -2023,29 +2065,29 @@ async function loadAgents() {
 }
 function agentConn(id) {
   const a = S.agents.get(id);
-  if (!a) return { cls: '', text: '상태 모름' };
-  if (a.state === 'no_credential') return { cls: 'off', text: '토큰 없음 — 어댑터가 붙을 수 없음' };
-  if (a.state === 'revoked') return { cls: 'off', text: `토큰 폐기·만료됨${a.last_seen_at ? ` · 마지막 접속 ${rel(a.last_seen_at)}` : ''}` };
-  if (a.state === 'never') return { cls: '', text: '한 번도 접속 안 함' };
+  if (!a) return { cls: '', text: t('app.conn_unknown') };
+  if (a.state === 'no_credential') return { cls: 'off', text: t('app.conn_no_token') };
+  if (a.state === 'revoked') return { cls: 'off', text: `${t('app.conn_revoked')}${a.last_seen_at ? t('app.last_seen_suffix', { when: rel(a.last_seen_at) }) : ''}` };
+  if (a.state === 'never') return { cls: '', text: t('app.conn_never') };
   const age = Date.now() - a.last_seen_at;
-  return { cls: age < 60_000 ? 'on' : 'stale', text: `마지막 접속 ${age < 60_000 ? `${Math.max(1, Math.floor(age / 1000))}초 전` : rel(a.last_seen_at)}` };
+  return { cls: age < 60_000 ? 'on' : 'stale', text: t('app.last_seen', { when: age < 60_000 ? t('app.secs_ago', { n: Math.max(1, Math.floor(age / 1000)) }) : rel(a.last_seen_at) }) };
 }
 function renderPeopleTab() {
   $('sync-info').replaceChildren(
-    el('div', {}, '실시간 연결: ', el('b', {}, S.wsOpen ? '연결됨(WebSocket)' : '끊김 — 재접속 중')),
-    el('div', { class: 'muted' }, `마지막 동기화: ${S.lastSync ? fmtTime(S.lastSync) : '아직 없음'}`),
+    el('div', {}, t('app.realtime'), el('b', {}, S.wsOpen ? t('app.ws_connected') : t('app.ws_reconnecting'))),
+    el('div', { class: 'muted' }, t('app.last_sync', { time: S.lastSync ? fmtTime(S.lastSync) : t('app.none_yet') })),
   );
   const d = S.detail;
   if (!d) return $('people').replaceChildren();
   $('people').replaceChildren(
     ...d.members.map((m) => {
-      const c = m.kind === 'agent' ? agentConn(m.participant_id) : { cls: 'on', text: m.participant_id === S.me?.id ? '지금 이 화면' : '' };
+      const c = m.kind === 'agent' ? agentConn(m.participant_id) : { cls: 'on', text: m.participant_id === S.me?.id ? t('app.this_screen') : '' };
       return el(
         'li',
         {},
         el('span', { class: `dot ${c.cls}`, 'aria-hidden': 'true' }),
-        el('span', { class: 'who' }, el('b', {}, m.name), ' ', el('span', { class: 'faint' }, m.kind === 'agent' ? '에이전트' : '마스터'), el('div', { class: 'muted' }, c.text)),
-        el('span', { class: 'faint' }, [m.can_read ? '읽기' : '', m.can_post ? '쓰기' : '', m.can_invoke ? '호출' : ''].filter(Boolean).join('·')),
+        el('span', { class: 'who' }, el('b', {}, m.name), ' ', el('span', { class: 'faint' }, m.kind === 'agent' ? t('app.agent') : t('app.master')), el('div', { class: 'muted' }, c.text)),
+        el('span', { class: 'faint' }, [m.can_read ? t('app.perm_read') : '', m.can_post ? t('app.perm_post') : '', m.can_invoke ? t('app.perm_invoke') : ''].filter(Boolean).join('·')),
       );
     }),
   );
@@ -2059,7 +2101,7 @@ function openFork(seq) {
   if (!S.detail) return;
   const cands = [...S.context, ...S.messages].sort((a, b) => a.seq - b.seq);
   if (!cands.length) {
-    notify('스레드 생성', '이 대화에 메시지가 없어 분기할 수 없습니다. 첫 메시지를 먼저 쓰세요.');
+    notify(t('app.new_thread'), t('app.fork_no_messages'));
     return;
   }
   S.fork = {
@@ -2085,17 +2127,17 @@ function forkStep(n) {
   $('fork-step1').hidden = n !== 1;
   $('fork-step2').hidden = n !== 2;
   if (n === 1) {
-    $('fork-parent').textContent = `부모: ${S.detail.thread.kind === 'room' ? '메인 채팅방' : pathOf(S.detail.thread)}`;
+    $('fork-parent').textContent = t('app.parent_label', { name: S.detail.thread.kind === 'room' ? t('app.main_room') : pathOf(S.detail.thread) });
     $('fork-points').replaceChildren(
       ...f.cands.map((m) => {
-        const r = el('input', { type: 'radio', name: 'fork-point', value: String(m.seq), checked: m.seq === f.point, 'aria-label': `#${m.seq} 분기 시점으로 지정` });
+        const r = el('input', { type: 'radio', name: 'fork-point', value: String(m.seq), checked: m.seq === f.point, 'aria-label': t('app.set_branch_point_aria', { seq: m.seq }) });
         r.addEventListener('change', () => {
           f.point = m.seq;
           f.picked = null;
           for (const p of $('fork-points').querySelectorAll('.pick')) p.classList.toggle('sel', p.dataset.seq === String(m.seq));
           syncForkNext();
         });
-        return el('label', { class: `pick${m.seq === f.point ? ' sel' : ''}`, 'data-seq': String(m.seq) }, r, pickBody(m), el('span', { class: 'tag' }, '분기 시점으로 지정'));
+        return el('label', { class: `pick${m.seq === f.point ? ' sel' : ''}`, 'data-seq': String(m.seq) }, r, pickBody(m), el('span', { class: 'tag' }, t('app.set_branch_point')));
       }),
     );
     const sel = $('fork-points').querySelector('.pick.sel');
@@ -2108,7 +2150,7 @@ function pickBody(m) {
   return el(
     'span',
     { class: 'pm' },
-    el('span', { class: 'ph' }, el('b', {}, pname(m.author_id)), el('span', {}, `#${m.seq}`), el('span', {}, fmtTime(m.created_at)), S.context.some((c) => c.seq === m.seq) ? el('span', {}, '(가져온 맥락)') : null),
+    el('span', { class: 'ph' }, el('b', {}, pname(m.author_id)), el('span', {}, `#${m.seq}`), el('span', {}, fmtTime(m.created_at)), S.context.some((c) => c.seq === m.seq) ? el('span', {}, t('app.inherited_ctx')) : null),
     el('span', { class: 'pb' }, m.body),
   );
 }
@@ -2162,26 +2204,26 @@ function renderForkStep2() {
   const agents = S.detail.members.filter((m) => m.kind === 'agent');
   const drSel = el(
     'select',
-    { id: 'fork-dr', 'aria-label': '기본 수신자' },
-    el('option', { value: '' }, `부모와 같음 (${dr ? pname(dr) : '없음'})`),
+    { id: 'fork-dr', 'aria-label': t('app.default_recipient') },
+    el('option', { value: '' }, t('app.same_as_parent', { x: dr ? pname(dr) : t('app.none') })),
     ...agents.map((a) => el('option', { value: a.participant_id, selected: f.dr === a.participant_id }, a.name)),
   );
   drSel.addEventListener('change', () => (f.dr = drSel.value || null));
   const kv = (k, ...v) => [el('dt', {}, k), el('dd', {}, ...v)];
   $('fork-summary').replaceChildren(
-    ...kv('제목', $('fork-title').value.trim()),
-    ...kv('부모', S.detail.thread.kind === 'room' ? '메인 채팅방' : pathOf(S.detail.thread)),
-    ...kv('분기 시점 메시지', `#${pm.seq} · ${fmtTime(pm.created_at)} · ${pname(pm.author_id)}`),
-    ...kv('참여 에이전트', `부모와 같음 (${agents.map((a) => a.name).join(', ') || '없음'})`),
-    ...kv('기본 수신자', drSel),
+    ...kv(t('app.title'), $('fork-title').value.trim()),
+    ...kv(t('app.parent'), S.detail.thread.kind === 'room' ? t('app.main_room') : pathOf(S.detail.thread)),
+    ...kv(t('app.branch_point_msg'), `#${pm.seq} · ${fmtTime(pm.created_at)} · ${pname(pm.author_id)}`),
+    ...kv(t('app.participating_agents'), t('app.same_as_parent', { x: agents.map((a) => a.name).join(', ') || t('app.none') })),
+    ...kv(t('app.default_recipient'), drSel),
   );
   const inc = forkRange();
   const upto = f.cands.filter((m) => m.seq <= f.point);
-  $('fork-count').replaceChildren('총 ', el('b', {}, String(inc.size)), '개 메시지가 이 스레드에 포함됩니다.');
+  $('fork-count').replaceChildren(t('app.fork_count_pre'), el('b', {}, String(inc.size)), t('app.fork_count_post'));
   $('fork-include').replaceChildren(
     ...upto.map((m) => {
       const isPoint = m.seq === f.point;
-      const cb = el('input', { type: 'checkbox', value: String(m.seq), checked: inc.has(m.seq), disabled: isPoint, 'aria-label': `#${m.seq} 포함` });
+      const cb = el('input', { type: 'checkbox', value: String(m.seq), checked: inc.has(m.seq), disabled: isPoint, 'aria-label': t('app.include_aria', { seq: m.seq }) });
       cb.addEventListener('change', () => {
         const cur = forkRange();
         if (cb.checked) cur.add(m.seq);
@@ -2190,17 +2232,17 @@ function renderForkStep2() {
         f.picked = cur;
         renderForkStep2();
       });
-      return el('label', { class: `pick${inc.has(m.seq) ? ' sel' : ''}` }, cb, pickBody(m), isPoint ? el('span', { class: 'tag' }, '분기 시점') : null);
+      return el('label', { class: `pick${inc.has(m.seq) ? ' sel' : ''}` }, cb, pickBody(m), isPoint ? el('span', { class: 'tag' }, t('app.branch_point')) : null);
     }),
   );
   $('fork-go').disabled = inc.size === 0 || f.busy;
 }
 const FORK_ERR = {
-  bad_fork_point: '분기 시점 메시지가 이 대화에 없습니다(없어졌거나 열람 권한이 사라짐). 1단계에서 다시 고르세요.',
-  bad_include: '분기 시점 뒤의 메시지가 범위에 들어 있습니다. 범위를 다시 확인하세요.',
-  no_thread: '부모 대화를 더 이상 열 수 없습니다.',
-  client_key_reused: '같은 요청 식별자가 다른 내용에 쓰였습니다. 다시 시도하면 새 식별자로 보냅니다.',
-  bad_recipient: '기본 수신자가 에이전트가 아닙니다.',
+  bad_fork_point: t('app.forkerr_bad_fork_point'),
+  bad_include: t('app.forkerr_bad_include'),
+  no_thread: t('app.forkerr_no_thread'),
+  client_key_reused: t('app.forkerr_client_key_reused'),
+  bad_recipient: t('app.forkerr_bad_recipient'),
 };
 $('fork-go').addEventListener('click', submitFork);
 async function submitFork() {
@@ -2232,13 +2274,13 @@ async function submitFork() {
   } catch (err) {
     f.busy = false;
     if (err.code === 'client_key_reused') f.sig = null;
-    const msg = err.status ? FORK_ERR[err.code] ?? `${err.message}` : '응답을 받지 못했습니다. [다시 시도]는 같은 요청 식별자로 보내므로 스레드가 두 번 생기지 않습니다.';
+    const msg = err.status ? FORK_ERR[err.code] ?? `${err.message}` : t('app.fork_no_response');
     const box = $('fork-error');
     box.hidden = false;
     box.replaceChildren(
-      el('b', {}, '스레드 생성 실패'),
+      el('b', {}, t('app.fork_failed')),
       el('div', {}, msg),
-      el('div', { class: 'row' }, el('button', { type: 'button', onclick: () => forkStep(1) }, '돌아가기'), el('button', { type: 'button', id: 'fork-retry', class: 'primary', onclick: submitFork }, '다시 시도')),
+      el('div', { class: 'row' }, el('button', { type: 'button', onclick: () => forkStep(1) }, t('app.back')), el('button', { type: 'button', id: 'fork-retry', class: 'primary', onclick: submitFork }, t('app.retry_again'))),
     );
     $('fork-go').disabled = false;
   }
@@ -2259,13 +2301,16 @@ async function send(item) {
     item.uploads ??= [];
     for (let i = 0; i < files.length; i++) {
       if (item.uploads[i]) continue;
-      item.upNote = `첨부 올리는 중 ${i + 1}/${files.length}`;
+      item.upNote = t('app.uploading', { i: i + 1, n: files.length });
       renderOutbox();
       try {
         const u = await api('POST', `/api/uploads?name=${encodeURIComponent(files[i].name)}`, undefined, files[i]);
         item.uploads[i] = u.upload.id;
       } catch (e) {
-        if (e.status) e.message = `첨부 «${files[i].name}»: ${e.status === 413 ? '20MB를 넘습니다' : e.message}`;
+        if (e.status) {
+          e.message = t('app.att_error', { name: files[i].name, msg: e.status === 413 ? t('app.over_20mb') : e.message });
+          e.att = true; // 첨부 오류 표시(실패 칸에 그대로 보인다)
+        }
         throw e;
       }
     }
@@ -2277,19 +2322,19 @@ async function send(item) {
     if (item.payload.recipients.length && !r.invoke_paused) markAwait(r.message.thread_id ?? item.thread, r.message.seq);
     S.sentKeys.add(item.payload.client_key);
     item.state = 'stored'; // 저장 확인. 목록에서 그 seq 를 받으면 «전송 완료»로 바뀌고 사라진다
-    announce(`전송 완료: ${r.target?.title ?? ''}`);
-    if (r.invoke_paused && item.payload.recipients.length) notify('메시지만 저장됨', '이 대화는 «새 호출 금지» 상태라 에이전트를 부르지 않았습니다.');
+    announce(t('app.sent_to', { title: r.target?.title ?? '' }));
+    if (r.invoke_paused && item.payload.recipients.length) notify(t('app.saved_only'), t('app.saved_only_text'));
   } catch (err) {
     if (!err.status || err.status >= 500 || err.status === 408) {
       // 응답을 못 받았다 — 저장됐는지 모른다. 같은 client_key 로 다시 물어 확인한다
       item.state = 'unknown';
-      item.error = err.status ? `서버 오류 ${err.status}` : '응답을 받지 못했습니다';
-      announce('전송 결과 미확인');
+      item.error = err.status ? t('app.server_error', { status: err.status }) : t('app.no_response');
+      announce(t('app.send_unknown'));
     } else {
       item.state = 'failed';
-      item.error = (err.message?.startsWith('첨부 «') ? err.message : SEND_ERR[err.code]) ?? err.message;
+      item.error = (err.att ? err.message : SEND_ERR[err.code]) ?? err.message;
       item.retryable = err.status === 429;
-      announce(`전송 실패: ${item.error}`);
+      announce(t('app.send_failed_msg', { error: item.error }));
     }
   }
   renderOutbox();
@@ -2314,36 +2359,36 @@ function renderOutbox() {
   $('pending').replaceChildren(
     ...items.map((x) => {
       let st;
-      if (x.state === 'sending') st = el('span', { class: 'sendst wait' }, x.upNote ? `${x.upNote}…` : '전송 중…');
-      else if (x.state === 'stored') st = el('span', { class: 'sendst wait' }, '저장됨 — 목록 동기화 대기');
+      if (x.state === 'sending') st = el('span', { class: 'sendst wait' }, x.upNote ? `${x.upNote}…` : t('app.sending'));
+      else if (x.state === 'stored') st = el('span', { class: 'sendst wait' }, t('app.stored_wait'));
       else if (x.state === 'unknown')
         st = el(
           'div',
           { class: 'local-state unknown' },
-          el('b', { class: 'sendst unknown' }, '전송 결과 미확인'),
-          `${x.error}. [다시 확인]은 같은 요청 식별자로 보내므로 두 번 저장되지 않습니다.`,
-          el('button', { type: 'button', class: 'retry', onclick: () => send(x) }, '다시 확인'),
-          el('button', { type: 'button', onclick: () => reconnectNow() }, '재접속 복구'),
-          el('button', { type: 'button', onclick: () => dropItem(x) }, '버리기'),
+          el('b', { class: 'sendst unknown' }, t('app.send_unknown')),
+          t('app.unknown_explain', { error: x.error }),
+          el('button', { type: 'button', class: 'retry', onclick: () => send(x) }, t('app.check_again')),
+          el('button', { type: 'button', onclick: () => reconnectNow() }, t('app.reconnect_recover')),
+          el('button', { type: 'button', onclick: () => dropItem(x) }, t('app.discard')),
         );
       else
         st = el(
           'div',
           { class: 'local-state failed' },
-          el('b', { class: 'sendst failed' }, '전송 실패'),
+          el('b', { class: 'sendst failed' }, t('app.send_failed')),
           x.error,
-          x.retryable ? el('button', { type: 'button', class: 'retry', onclick: () => send(x) }, '재시도') : el('span', { class: 'faint' }, '(다시 보내도 같은 결과)'),
-          el('button', { type: 'button', onclick: () => editItem(x) }, '고쳐 쓰기'),
-          el('button', { type: 'button', onclick: () => dropItem(x) }, '버리기'),
+          x.retryable ? el('button', { type: 'button', class: 'retry', onclick: () => send(x) }, t('app.retry')) : el('span', { class: 'faint' }, t('app.same_result')),
+          el('button', { type: 'button', onclick: () => editItem(x) }, t('app.edit')),
+          el('button', { type: 'button', onclick: () => dropItem(x) }, t('app.discard')),
         );
       return el(
         'article',
         { class: 'msg mine local', 'data-key': x.payload.client_key },
-        el('span', { class: 'avatar', 'aria-hidden': 'true' }, S.me ? initials(S.me.id) : '나'),
+        el('span', { class: 'avatar', 'aria-hidden': 'true' }, S.me ? initials(S.me.id) : t('app.me')),
         el(
           'div',
           { class: 'main' },
-          el('div', { class: 'head' }, el('b', {}, S.me?.name ?? '나'), el('span', { class: 'badge' }, KIND[x.payload.source_kind]), x.payload.recipients.length ? el('span', {}, `→ ${x.payload.recipients.map(pname).join(', ')}`) : null, x.state === 'sending' || x.state === 'stored' ? st : null),
+          el('div', { class: 'head' }, el('b', {}, S.me?.name ?? t('app.me')), el('span', { class: 'badge' }, KIND[x.payload.source_kind]), x.payload.recipients.length ? el('span', {}, `→ ${x.payload.recipients.map(pname).join(', ')}`) : null, x.state === 'sending' || x.state === 'stored' ? st : null),
           el('div', { class: 'body' }, x.payload.body),
           x.files?.length ? el('div', { class: 'small faint' }, `📎 ${x.files.map((f) => f.name).join(', ')}`) : null,
           x.state === 'unknown' || x.state === 'failed' ? st : null,
@@ -2375,7 +2420,7 @@ $('composer').addEventListener('submit', async (e) => {
   if (!recipients.length && !memoChosen() && $('recipients').querySelector('input[data-agent]')) {
     const note = $('rcpt-note');
     if (note) {
-      note.textContent = '⚠ 받는 쪽을 고르지 않았습니다 — 에이전트를 고르거나 «메모»를 켜세요';
+      note.textContent = t('app.no_recipient_warn');
       note.classList.add('rcpt-warn');
     }
     $('recipients').querySelector('input[data-memo]')?.focus();
@@ -2424,7 +2469,7 @@ function setBanner(kind, text, pct, action) {
   b.hidden = false;
   b.className = `banner ${kind === 'done' ? 'ok' : kind === 'full' ? 'bad' : 'warn'}`;
   b.dataset.state = kind;
-  b.replaceChildren(el('b', {}, { reconnect: '재접속 중', bulk: '대량 메시지 복구 중', full: '전체 재조회 필요', done: '복구 완료' }[kind]), el('span', {}, text ?? ''), action ?? null);
+  b.replaceChildren(el('b', {}, { reconnect: t('app.banner_reconnect'), bulk: t('app.banner_bulk'), full: t('app.banner_full'), done: t('app.banner_done') }[kind]), el('span', {}, text ?? ''), action ?? null);
   if (pct != null) {
     const bar = el('span');
     bar.style.width = `${Math.round(pct)}%`;
@@ -2435,6 +2480,7 @@ function setBanner(kind, text, pct, action) {
 /** 다시 붙은 뒤 복구: 기준점(지금 서버의 마지막 seq)까지 커서로 묶음 조회, 끝나면 순서·중복을 검사한다 */
 async function recover() {
   await loadThreads().catch(() => {});
+  queueLive();
   refreshRunsPage();
   refreshAdminPage(null);
   onDelegationNotice(); // 끊긴 동안 놓친 위임 알림
@@ -2454,26 +2500,26 @@ async function recover() {
   const show = S.everConnected;
   if (S.cursor > baseline) {
     // 서버가 우리 커서보다 뒤에 있다(DB 를 백업으로 되돌린 경우 등) — 커서가 무효. 처음부터 다시 읽는다
-    setBanner('full', '서버 기록이 이 화면보다 짧습니다. 처음부터 다시 불러옵니다. 그동안의 전송 결과는 확정하지 않습니다.');
+    setBanner('full', t('app.server_shorter'));
     await reloadMessages();
-    setBanner('done', `메시지 ${S.messages.length}건을 다시 불러왔습니다.`);
+    setBanner('done', t('app.reloaded_n', { n: S.messages.length }));
     return;
   }
   const start = S.cursor;
   let bulk = false;
   const added = await fetchNew((n, cursor, more) => {
     if (more && !bulk && show) bulk = true;
-    if (bulk) setBanner('bulk', `받은 메시지 ${n}건`, baseline > start ? ((cursor - start) / (baseline - start)) * 100 : 100);
+    if (bulk) setBanner('bulk', t('app.received_n', { n }), baseline > start ? ((cursor - start) / (baseline - start)) * 100 : 100);
   }).catch(() => null);
   if (added === null) return;
   // 복구 검증: seq 오름차순 · 중복 없음 — 어긋나면 전체 재조회
   const ok = S.messages.every((m, i) => i === 0 || S.messages[i - 1].seq < m.seq) && new Set(S.messages.map((m) => m.seq)).size === S.messages.length;
   if (!ok) {
-    setBanner('full', '받은 목록이 어긋났습니다. 처음부터 다시 불러옵니다.');
+    setBanner('full', t('app.list_mismatch'));
     await reloadMessages();
   }
   await Promise.all([loadRuns(), loadContext()]).catch(() => {});
-  if (show) setBanner('done', added ? `빠진 메시지 ${added}건을 받았습니다.` : '빠진 메시지가 없습니다.');
+  if (show) setBanner('done', added ? t('app.missing_received', { n: added }) : t('app.no_missing'));
   // 응답을 못 받은 전송은 같은 요청 식별자로 다시 확인한다
   for (const x of S.outbox.filter((x) => x.state === 'unknown')) send(x);
 }
@@ -2491,11 +2537,11 @@ function connectWs() {
   clearTimeout(retryTimer);
   const ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`);
   S.ws = ws;
-  setConn(false, '연결 중…');
+  setConn(false, t('app.connecting'));
   ws.onopen = () => {
     S.wsBackoff = 1000;
     S.wsOpen = true;
-    setConn(true, '연결됨');
+    setConn(true, t('app.connected'));
     clearInterval(pingTimer);
     pingTimer = setInterval(() => ws.readyState === WebSocket.OPEN && ws.send('{"t":"ping"}'), 25000);
   };
@@ -2519,6 +2565,7 @@ function connectWs() {
       refreshRunsPage();
     } else if (n.t === 'run') {
       if (n.thread_id === S.cur) loadRuns();
+      queueLive();
       refreshRunsPage();
     } else if (n.t === 'thread') {
       if (room() && n.thread_id === room().id) S.roomDirty = true;
@@ -2540,8 +2587,8 @@ function connectWs() {
     S.wsOpen = false;
     if ($('app-view').hidden) return;
     const secs = Math.round(S.wsBackoff / 1000);
-    setConn(false, `끊김 — ${secs}초 뒤 재접속`);
-    if (S.cur) setBanner('reconnect', `서버 연결이 끊어졌습니다. ${secs}초 뒤 다시 연결합니다. 받은 메시지는 그대로 보입니다.`, null, el('button', { type: 'button', onclick: reconnectNow }, '지금 다시 연결'));
+    setConn(false, t('app.disconnected_retry', { n: secs }));
+    if (S.cur) setBanner('reconnect', t('app.ws_lost_banner', { n: secs }), null, el('button', { type: 'button', onclick: reconnectNow }, t('app.reconnect_now')));
     retryTimer = setTimeout(retryConnect, S.wsBackoff);
     S.wsBackoff = Math.min(S.wsBackoff * 2, 30000);
   };
@@ -2595,7 +2642,7 @@ document.addEventListener('keydown', (e) => {
     if (!$('confirm').hidden) confirmResolve && confirmResolve(false);
     else if (!$('fork-modal').hidden) closeFork();
     else if (document.body.classList.contains('show-sidebar')) setDrawer(false);
-    else if (S.auxOpen && isNarrow()) setAux(false);
+    else if (S.auxOpen && auxOverlays()) setAux(false);
     else if (S.mode === 'audit' && S.auOpen) closeAuditDetail();
     // 보낸 글 취소(마스터 #475) — 닫을 게 없고 이 대화에 안 나간 전달이나 대기·실행 중인 실행이 있을 때만 · 확인 창(Enter 확인 · Esc 그만)
     else if (S.mode === 'convo' && S.cur && !$('app-view').hidden && (S.runs.some(activeRun) || S.deliveries.some((x) => x.status === 'pending' || x.status === 'leased'))) {
@@ -2621,7 +2668,7 @@ if (typeof matchMedia === 'function') {
       if (S.auxOpen && S.tab === 'runs') renderRunsTab();
     }
   };
-  for (const q of ['(max-width: 760px)', '(max-width: 999px)']) {
+  for (const q of ['(max-width: 760px)', '(max-width: 999px)', '(max-width: 1279px)']) {
     const mq = matchMedia(q);
     if (mq.addEventListener) mq.addEventListener('change', onMq);
   }
@@ -2639,6 +2686,7 @@ async function boot() {
   S.onCallOnly = new Set(me.on_call_only ?? []);
   $('me').textContent = S.me.name;
   $('logout-btn').hidden = false;
+  $('top-aux-btn').hidden = false;
   $('login-view').hidden = true;
   $('app-view').hidden = false;
   const ps = (await api('GET', '/api/participants')).participants;
@@ -2646,6 +2694,7 @@ async function boot() {
   S.tab = ['runs', 'sessions', 'people', 'claims'].includes(store('bs.aux-tab')) ? store('bs.aux-tab') : 'runs';
   setAux(!auxOverlays() && store('bs.aux-open') === '1', S.tab);
   await loadThreads();
+  queueLive();
   loadAgents();
   connectWs();
   // 주소로 글 미리 채우기(Orbit LAUNCH · 마스터 #252~#266): ?thread=…&to=a,b&compose=… — 채우기만 하고 보내지는 않는다
@@ -2686,4 +2735,132 @@ if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.
 }
 initRuns();
 initAdmin();
+// ───── 화면 언어 고르기(마스터 #821·#823) — 메뉴 맨 아래(로그아웃 위). 고르면 이 기기에 저장 · 마스터면 서버 언어도(에이전트 규약이 따른다) · 다시 읽는다 ─────
+function mountLangSelect() {
+  const menu = $('menu');
+  if (!menu || $('lang-select') || !(I18N.langs?.length > 1)) return;
+  const sel = el('select', { id: 'lang-select', 'aria-label': t('app.language'), title: t('app.language') }, ...I18N.langs.map((l) => el('option', { value: l.code, selected: l.code === I18N.lang }, l.name)));
+  sel.addEventListener('change', async () => {
+    const code = sel.value;
+    I18N.save(code);
+    if (S.me?.is_master) await api('PUT', '/api/settings/lang', { lang: code }).catch(() => {});
+    location.reload();
+  });
+  const box = el('label', { class: 'menu-lang' }, el('span', { class: 'mi-label' }, t('app.language')), sel);
+  menu.insertBefore(box, menu.querySelector('.menu-logout'));
+}
+mountLangSelect();
 boot();
+
+// ───── 좁은 화면(디자인 #782 · ≤760): ⋯ 시트 · 길게 눌러 글 동작 · 상단 점 · 짧은 자리표시 ─────
+// 머리 동작은 원래 버튼을 그대로 두고(넓은 화면·키보드 단축키가 쓴다) 시트가 그 버튼을 대신 누른다 — 숨김·이름은 열 때마다 원래 버튼에서 읽는다
+const SHEET_IDS = ['t-face', 't-merge', 't-md', 't-copy', 't-audit', 'fork-btn', 'aux-btn'];
+const SHEET_TIDY = ['st-rename', 'st-archive', 'st-unarchive', 'st-hide', 'st-unhide', 'st-trash', 'st-restore', 'st-purge'];
+function setSheet(open) {
+  const sh = $('t-sheet');
+  if (open) {
+    const item = (id) => {
+      const o = $(id);
+      if (!o || o.hidden || o.disabled) return null;
+      const b = el('button', { type: 'button', role: 'menuitem', class: o.classList.contains('danger') ? 'danger' : '' }, o.textContent.trim());
+      b.addEventListener('click', () => {
+        setSheet(false);
+        o.click();
+      });
+      return b;
+    };
+    const main = SHEET_IDS.map(item).filter(Boolean);
+    const tidy = $('t-menu').hidden ? [] : SHEET_TIDY.map(item).filter(Boolean); // 채팅방엔 «정리» 없음
+    sh.replaceChildren(...main, ...(tidy.length ? [el('div', { class: 'sheet-sec', 'aria-hidden': 'true' }, t('app.tidy')), ...tidy] : []));
+  }
+  sh.hidden = !open;
+  $('t-more-btn').setAttribute('aria-expanded', String(open));
+  if (open) sh.querySelector('button')?.focus();
+}
+$('t-more-btn').addEventListener('click', (e) => {
+  e.stopPropagation();
+  setSheet($('t-sheet').hidden);
+});
+document.addEventListener('click', (e) => {
+  if (!$('t-sheet').hidden && !e.target.closest('#t-sheet')) setSheet(false);
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && !$('t-sheet').hidden) {
+    setSheet(false);
+    $('t-more-btn').focus();
+  }
+});
+
+// 글 동작(답장·복사·분기 …): 좁은 화면에선 숨겨 두고 글을 길게 누르면 그 글에만 보인다 — 다른 곳을 누르면 걷힌다
+{
+  let timer = 0;
+  let start = null;
+  const clear = () => {
+    clearTimeout(timer);
+    timer = 0;
+  };
+  $('messages').addEventListener('pointerdown', (e) => {
+    if (!isNarrow() || e.pointerType === 'mouse' || e.target.closest('button, a, input, textarea, select, summary')) return;
+    const m = e.target.closest('.msg');
+    if (!m) return;
+    start = [e.clientX, e.clientY];
+    clear();
+    timer = setTimeout(() => {
+      timer = 0;
+      for (const x of document.querySelectorAll('.msg.show-actions')) if (x !== m) x.classList.remove('show-actions');
+      m.classList.add('show-actions');
+      navigator.vibrate?.(10);
+    }, 480);
+  });
+  $('messages').addEventListener('pointermove', (e) => {
+    if (timer && start && Math.hypot(e.clientX - start[0], e.clientY - start[1]) > 10) clear();
+  });
+  for (const t of ['pointerup', 'pointercancel']) $('messages').addEventListener(t, clear);
+  document.addEventListener('click', (e) => {
+    if (e.target.closest('.msg.show-actions')) return;
+    for (const x of document.querySelectorAll('.msg.show-actions')) x.classList.remove('show-actions');
+  });
+}
+
+// 상단 보조 패널 아이콘의 금색 점 = 응답 대기 띠가 떠 있을 때
+new MutationObserver(() => {
+  $('top-aux-dot').hidden = $('wait-banner').hidden;
+}).observe($('wait-banner'), { attributes: true, attributeFilter: ['hidden'] });
+
+// 작성란 자리표시: 좁은 화면은 한 줄 칸이라 짧게
+{
+  const long = $('body').placeholder;
+  const mq = typeof matchMedia === 'function' ? matchMedia('(max-width: 760px)') : { matches: false, addEventListener() {} };
+  const apply = () => {
+    $('body').placeholder = mq.matches ? t('app.msg_input') : long;
+    if (!mq.matches) setSheet(false);
+  };
+  mq.addEventListener('change', apply);
+  apply();
+}
+
+// ───── 대화 목록의 «실행 중» 점(디자인 #782): 대기·실행 중인 실행이 있는 대화에 에이전트 이름 ─────
+// 실행 목록 API(마스터 전용) 를 «지금부터»로 물어 진행 중인 것만 받는다 · 실행 알림마다 0.3초 모아 한 번 · 못 읽으면(마스터 아님 등) 점 없이 둔다
+let liveTimer = 0;
+let liveSig = '';
+function queueLive() {
+  clearTimeout(liveTimer);
+  liveTimer = setTimeout(() => loadLive().catch(() => {}), 300);
+}
+async function loadLive() {
+  if (!S.me || $('app-view').hidden) return;
+  const r = await api('GET', `/api/runs?since=${Date.now() + 3600000}&limit=100`);
+  const m = new Map();
+  for (const x of r.runs ?? []) {
+    if (x.state !== 'queued' && x.state !== 'running') continue;
+    const names = m.get(x.thread_id) ?? [];
+    const n = pname(x.agent_id);
+    if (!names.includes(n)) names.push(n);
+    m.set(x.thread_id, names);
+  }
+  const sig = JSON.stringify([...m].sort());
+  if (sig === liveSig) return;
+  liveSig = sig;
+  S.live = m;
+  renderList();
+}

@@ -1,6 +1,6 @@
 // 하위 스레드 합치기(2026-10-21 마스터 #706 · 마이그레이션 17)
 //   하위 스레드의 제 글(가져온 맥락 빼고) → 상위 대화에 묶음 글 하나 · 출처 «인용» · 아무도 안 부름 ·
-//   다시 합치면 지난 합침 뒤만 · 에이전트 claim 맥락에서 옮긴 글 전문으로 펼침 · 마스터만 · 상위가 닫혔으면 거절 · 영구 삭제
+//   합친 뒤 상위만 남음(하위는 보관·숨김 · 아래 분기는 상위로 · #962) · 다시 합치면 지난 합침 뒤만 · 에이전트 claim 맥락에서 옮긴 글 전문으로 펼침 · 마스터만 · 상위가 닫혔으면 거절 · 영구 삭제
 import assert from 'node:assert/strict';
 import Database from 'better-sqlite3';
 import fs from 'node:fs';
@@ -32,6 +32,8 @@ describe('하위 스레드 합치기', () => {
     const a = await post(ctx, child, '하위 지시 **하나**');
     const b = await ctx.agent('alpha', 'POST', `/api/threads/${child}/messages`, { body: '알파 제안', client_key: 'k-m-1', source_kind: 'proposal' });
     assert.equal(b.status, 201);
+    const g = await ctx.master('POST', `/api/threads/${child}/fork`, { from_seq: a.message.seq, title: '손자', client_key: 'k-m-g' });
+    const grand = g.json.thread.id;
     const r = await ctx.master('POST', `/api/threads/${child}/merge`);
     assert.equal(r.status, 201);
     const m = r.json.message;
@@ -46,11 +48,18 @@ describe('하위 스레드 합치기', () => {
     const d = (await ctx.master('GET', `/api/threads/${child}`)).json;
     assert.equal(d.unmerged, 0);
     assert.equal(d.merges.length, 1);
+    // 상위만 남는다(#962): 하위는 보관·숨김(그래도 열림) · 손자는 상위로 올라감 · 하위엔 더 못 씀
+    assert.equal(d.thread.status, 'archived');
+    assert.equal(d.thread.hidden, true);
+    assert.equal((await ctx.master('GET', `/api/threads/${grand}`)).json.thread.parent_thread_id, parent);
+    assert.equal((await ctx.master('POST', `/api/threads/${child}/messages`, { body: '닫힌 뒤', client_key: 'k-m-closed' })).status, 409);
     const runs = (await ctx.master('GET', `/api/runs?thread=${parent}`)).json;
     assert.equal((runs.runs ?? []).length, 0); // 아무도 안 부른다
   });
 
   test('다시 합치면 지난 합침 뒤 글만', async () => {
+    // 되돌리기 = 보관 해제(숨김은 그대로) → 이어 쓰고 다시 합치면 그 뒤 글만
+    assert.equal((await ctx.master('POST', `/api/threads/${child}/state`, { action: 'unarchive' })).status, 200);
     assert.equal((await ctx.master('POST', `/api/threads/${child}/merge`)).json.error, 'nothing_to_merge');
     const c = await post(ctx, child, '하위 셋째');
     assert.equal((await ctx.master('GET', `/api/threads/${child}`)).json.unmerged, 1);
@@ -79,6 +88,7 @@ describe('하위 스레드 합치기', () => {
 
   test('마스터만 · 상위가 보관이면 409', async () => {
     assert.equal((await ctx.agent('alpha', 'POST', `/api/threads/${child}/merge`)).status, 403);
+    await ctx.master('POST', `/api/threads/${child}/state`, { action: 'unarchive' });
     await post(ctx, child, '넷째');
     assert.equal((await ctx.master('POST', `/api/threads/${parent}/state`, { action: 'archive' })).status, 200);
     assert.equal((await ctx.master('POST', `/api/threads/${child}/merge`)).json.error, 'parent_closed');
@@ -89,6 +99,12 @@ describe('하위 스레드 합치기', () => {
   test('하위 스레드 영구 삭제 — 합침 기록도 지움(외래 키 안 깨짐) · 묶음 글은 머리 한 줄로 남음', async () => {
     const st = await ctx.master('POST', `/api/threads/${child}/state`, { action: 'trash' });
     assert.equal(st.status, 200);
+    // 상위로 올라간 손자가 하위 글을 분기 맥락으로 쥐고 있다 — 손자부터(#962)
+    assert.equal((await ctx.master('POST', `/api/threads/${child}/purge`, { confirm: '하위 논의' })).json.error, 'context_in_use');
+    const grand = (await ctx.master('GET', '/api/threads?include=all')).json.threads?.find((t: any) => t.title === '손자')?.id;
+    assert.ok(grand);
+    await ctx.master('POST', `/api/threads/${grand}/state`, { action: 'trash' });
+    assert.equal((await ctx.master('POST', `/api/threads/${grand}/purge`, { confirm: '손자' })).status, 200);
     const pg = await ctx.master('POST', `/api/threads/${child}/purge`, { confirm: '하위 논의' });
     assert.equal(pg.status, 200);
     const list = (await ctx.master('GET', `/api/threads/${parent}/messages`)).json.messages;

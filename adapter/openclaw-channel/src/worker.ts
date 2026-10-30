@@ -11,6 +11,7 @@
 //     그 답을 올린다(«완료 우선 확정» — 서버가 succeeded 로 받는다). 확인 뒤의 늦은 답은 서버가 거절한다.
 //   - 토큰·본문은 로그에 남기지 않는다(식별자만).
 import type { AttachmentInfo, ClaimCarry, ClaimFace, ClaimForward, ClaimHoldNotice, ClaimPulled, ClaimSession, Message, Participant, Run } from '../../../src/protocol.js';
+import { t } from '../../../src/i18n.js';
 import { buildPrompt, describeActualModel, redact, selectNewContext, sessionKeyFor, stripAnswerStamp } from './mapping.js';
 
 export interface TurnRequest {
@@ -22,6 +23,8 @@ export interface TurnRequest {
   /** 원인 메시지 작성자 — 에이전트 실행 맥락에 넘긴다 */
   sender: { id: string; name: string; isMaster: boolean };
   threadTitle: string;
+  /** 스레드 id — 실행기가 도구에 넘길 때(claude-cli 는 BRAINSTORM_THREAD_ID) */
+  threadId?: string;
   /** 이번 턴에 넘기는 메시지들의 첨부(프롬프트에는 목록만 있다). 실행기가 파일이 필요하면 fetchAttachment 로 받는다 */
   attachments?: TurnAttachment[];
   fetchAttachment?: (id: string, signal?: AbortSignal) => Promise<Buffer>;
@@ -29,6 +32,8 @@ export interface TurnRequest {
   onProgress?: (note: string) => void;
   /** 이번 턴에 넘기는 글의 본문(제목 포함) — 실행기가 태그 등을 읽을 때 쓴다(프롬프트 틀 글은 빠진다) */
   texts?: string[];
+  /** 규약·안내 언어(claim.lang · 마스터 #823) — 실행기가 덧붙이는 안내도 이 언어로 */
+  lang?: string;
 }
 
 export type TurnAttachment = AttachmentInfo & { seq: number };
@@ -90,6 +95,8 @@ interface Claim {
   /** 네 요청이 보류됐다는 알림(그 스레드에서 처음 불리는 실행 한 번만) — 옛 서버는 안 보낸다 */
   hold_notices?: ClaimHoldNotice[] | null;
   face?: ClaimFace | null;
+  /** 규약·안내 언어(마스터 #823) — 옛 서버는 안 보낸다(ko) */
+  lang?: string;
 }
 
 export class HttpError extends Error {
@@ -274,7 +281,7 @@ export class BrainstormWorker {
     let cancelled = false;
     let lost = false;
     // 읽음: 시작 즉시 기계적 반응을 한 번 보낸다 — 턴이 길어도 화면은 «반응 없음»이 아니다. 그 뒤 경과는 실행기가 바꾼다
-    let progress = '읽었음 — 작업 시작';
+    let progress = t(claim.lang, 'progress.read_start');
     let sent = '';
     const beat = () => {
       const note = progress !== sent ? progress : undefined;
@@ -325,6 +332,7 @@ export class BrainstormWorker {
         carry: claim.carry ?? null,
         holdNotices: claim.hold_notices ?? null,
         face: claim.face ?? null,
+        lang: claim.lang ?? null,
       });
       const author = this.participants.get(claim.trigger.author_id);
       const started = Date.now();
@@ -338,9 +346,11 @@ export class BrainstormWorker {
           signal: ac.signal,
           sender: { id: claim.trigger.author_id, name: author?.name ?? claim.trigger.author_id, isMaster: !!author?.is_master },
           threadTitle: claim.thread.title,
+          threadId: claim.thread.id,
           texts: [claim.thread.title, ...newMessages.map((m) => m.body ?? '')],
           attachments: newMessages.flatMap((m) => (m.attachments ?? []).map((a) => ({ ...a, seq: m.seq }))),
           fetchAttachment: (id, signal) => this.client.download(id, signal),
+          lang: claim.lang,
           onProgress: (note) => {
             const n = note.replace(/\s+/g, ' ').trim().slice(0, 300);
             if (n) progress = n;

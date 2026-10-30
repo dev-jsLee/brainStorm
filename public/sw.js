@@ -1,6 +1,6 @@
 // 앱 셸만 캐시한다. /api 와 /ws 는 절대 가로채지 않는다(원본은 서버).
-const CACHE = 'brainstorm-shell-v33';
-const SHELL = ['/', '/app.js', '/runs.js', '/admin.js', '/claims.js', '/face.js', '/style.css', '/manifest.webmanifest', '/icon.svg'];
+const CACHE = 'brainstorm-shell-v39';
+const SHELL = ['/', '/i18n-dict.js', '/i18n.js', '/app.js', '/runs.js', '/admin.js', '/claims.js', '/face.js', '/style.css', '/fonts.css', '/manifest.webmanifest', '/icon.svg'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));

@@ -1,6 +1,7 @@
 // 대면 모드(2026-10-19 마스터 #579·#581 · 설계 vault Design/brainStorm-대면-모드.md) — 순수 계산만. DB·HTTP 는 store.ts.
 //   가운데 합의문 하나를 백구(초안)·비전(검토)이 자기 턴에 직접 고친다. 턴은 서버가 기계적으로 넘긴다(진행자 LLM 없음).
 //   합의 = 수정 턴(2턴부터)이 합의문을 한 글자도 안 바꿈. 쟁점 = 상대가 직전 턴에 «고친»(초안 아님) 줄을 다시 고침.
+import { protocolWords } from './i18n.js';
 import { stripAnswerStamp } from './protocol.js';
 
 /** 합의문 한 줄의 출처. draft = 1턴 초안에서 온 줄(검토가 고쳐도 쟁점 아님) · issue = 묶인 열린 안건 */
@@ -41,8 +42,9 @@ export function normDoc(s: string): string {
 
 export const docLines = (s: string): string[] => (s === '' ? [] : s.split('\n'));
 
-const QUESTION_RE = /^\s*[*_`]*\s*질문\s*[:：]\s*(.+?)\s*[*_`]*\s*$/;
-const BLOCK_RE = /```+[ \t]*합의문[^\n]*\n([\s\S]*?)\n?```+/g;
+// 낱말(질문 · 합의문)은 모든 언어의 것을 함께 받는다(i18n protocolWords · 마스터 #823)
+const questionRe = () => new RegExp(`^\\s*[*_\`]*\\s*(?:${protocolWords('proto.question')})\\s*[:：]\\s*(.+?)\\s*[*_\`]*\\s*$`, 'i');
+const blockRe = () => new RegExp(`\`\`\`+[ \\t]*(?:${protocolWords('proto.agreement')})[^\\n]*\\n([\\s\\S]*?)\\n?\`\`\`+`, 'gi');
 
 /**
  * 대면 턴의 답 읽기. 끝줄(도장 뒤) `질문: …` 이 먼저 — 멈추고 마스터에게. 아니면 ```합의문 블록(여럿이면 마지막)이 합의문 전체,
@@ -56,10 +58,10 @@ export function parseFaceAnswer(body: string):
   const lines = text.replace(/\r\n/g, '\n').split('\n');
   let i = lines.length - 1;
   while (i >= 0 && !lines[i].trim()) i--;
-  const q = i >= 0 ? QUESTION_RE.exec(lines[i]) : null;
+  const q = i >= 0 ? questionRe().exec(lines[i]) : null;
   if (q && q[1].trim()) return { kind: 'question', question: q[1].trim().slice(0, 2000) };
   let last: RegExpExecArray | null = null;
-  for (const m of text.matchAll(BLOCK_RE)) last = m as RegExpExecArray;
+  for (const m of text.matchAll(blockRe())) last = m as RegExpExecArray;
   if (!last) return { kind: 'none' };
   const note = (text.slice(0, last.index) + text.slice(last.index + last[0].length)).replace(/\n{3,}/g, '\n\n').trim();
   return { kind: 'doc', doc: normDoc(last[1]), note };

@@ -1,20 +1,20 @@
 {
   "name": "brainstorm",
-  "version": "0.15.0",
+  "version": "0.22.1",
   "description": "brainStorm — 사람 한 명과 AI 에이전트들을 위한 자체 호스팅 스레드 대화 서버",
-  "license": "MIT",
   "type": "module",
   "engines": {
     "node": ">=22"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && node scripts/copy-i18n.mjs",
     "start": "node dist/src/server.js",
-    "test": "tsc -p tsconfig.json && node --test --test-concurrency=1 \"dist/test/**/*.test.js\"",
+    "test": "npm run build && node --test --test-concurrency=1 \"dist/test/**/*.test.js\"",
     "admin": "node dist/src/cli.js",
     "fake-adapter": "node dist/adapter/fake-adapter.js",
     "openai-adapter": "node dist/adapter/openai-adapter.js",
-    "test:ui": "tsc -p tsconfig.json && node scripts/ui-smoke.mjs"
+    "test:ui": "npm run build && node scripts/ui-smoke.mjs",
+    "i18n:check": "node scripts/i18n-check.mjs"
   },
   "dependencies": {
     "@fastify/cookie": "^11.1.2",
@@ -28,5 +28,6 @@
     "@types/ws": "^8.18.0",
     "jsdom": "^26.1.0",
     "typescript": "~5.9.0"
-  }
+  },
+  "license": "MIT"
 }

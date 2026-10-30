@@ -62,7 +62,14 @@ w.HTMLFormElement.prototype.requestSubmit = function () {
 w.Element.prototype.scrollIntoView = () => {};
 w.addEventListener('error', (e) => errors.push('error: ' + e.message));
 // 브라우저는 runs.js → app.js 순서로 같은 전역에서 읽는다. eval 은 const 를 나눠 갖지 않으므로 한 덩어리로
+// 언어(마스터 #823): 사전은 서버가 내고, 이 시험은 한국어 화면을 본다(jsdom 의 브라우저 언어는 en-US)
+w.localStorage.setItem('bs.lang', process.env.BS_UI_LANG || 'ko');
+const i18nDict = await (await fetch(new URL('/i18n-dict.js', base))).text();
 w.eval(
+  i18nDict +
+    '\n' +
+    fs.readFileSync(new URL('../public/i18n.js', import.meta.url), 'utf8') +
+    '\n' +
   fs.readFileSync(new URL('../public/runs.js', import.meta.url), 'utf8') +
     '\n' +
     fs.readFileSync(new URL('../public/admin.js', import.meta.url), 'utf8') +
@@ -753,8 +760,15 @@ ok(chips().every((i) => !i.checked) && errors.length === 0, '없는 칩 번호(A
 ok(!!w.document.querySelector('#recipients label.chip[title="단축키 Alt+1"]') && $('thread').textContent.length > 0, '칩에 «단축키 Alt+1» 표시');
 ok(w.document.body.innerHTML.includes('Alt+1~9 수신 대상'), '단축키 안내 문구 바뀜');
 await M('POST', `/api/threads/${FT}/messages`, { client_key: 'fwd-q', body: '알파에게', recipients: ['alpha'] });
-const fc = (await A('/api/adapter/claim', {})).claim;
-await A(`/api/adapter/runs/${fc.run.id}/start`, { run_token: fc.run.run_token });
+// 앞 절이 남긴 알파 앞 배달이 먼저 잡힐 수 있다 — 이 대화의 것이 나올 때까지 비운다(10-21 디자인 판 실측: 가끔 «fwd button» 시간 초과)
+let fc;
+for (;;) {
+  fc = (await A('/api/adapter/claim', {})).claim;
+  await A(`/api/adapter/deliveries/${fc.delivery.id}/ack`, { lease_token: fc.delivery.lease_token });
+  await A(`/api/adapter/runs/${fc.run.id}/start`, { run_token: fc.run.run_token });
+  if (fc.thread.id === FT) break;
+  await A(`/api/adapter/runs/${fc.run.id}/complete`, { run_token: fc.run.run_token, body: '정리' });
+}
 await A(`/api/adapter/runs/${fc.run.id}/complete`, { run_token: fc.run.run_token, body: '알파 답\n→ BETA' });
 const fwdBtn = () => msgs()[1]?.querySelector('.fwdbar button.fwd.primary-soft');
 await until(() => msgs().length === 2 && !!fwdBtn(), 5000, 'fwd button');
@@ -924,10 +938,17 @@ await w.__openThread(PR);
 await until(() => $('t-title').textContent === '끌어오기 시험', 5000, 'pull room');
 const atok = ctx.app.store.createToken('alpha', { label: 'pull-ui' }).token;
 const AA = (p, b) => fetch(base + p, { method: 'POST', headers: { Authorization: 'Bearer ' + atok, 'Content-Type': 'application/json' }, body: JSON.stringify(b ?? {}) }).then((r) => r.json());
+// 찾는 대화의 claim 이 나올 때까지 앞 배달을 비운다 — 아직 배달이 안 섰으면(빈 claim) 잠깐 기다려 다시 본다(10-21: 빈 claim 에 null 을 돌려 «원문 사본(pulled)» 검사가 가끔 깨짐)
 const drain = async (who, until) => {
-  for (;;) {
+  for (let idle = 0; ; ) {
     const c = (await who('/api/adapter/claim', {})).claim;
-    if (!c) return null;
+    if (!c) {
+      if (++idle > 100) return null;
+      await sleep(50);
+      continue;
+    }
+    // 받았음을 알린다 — 안 알리면 임대(300ms)가 풀려 같은 대화의 옛 배달이 다시 잡힌다(그 claim 엔 pulled 가 없다 · 10-22 실측)
+    await who(`/api/adapter/deliveries/${c.delivery.id}/ack`, { lease_token: c.delivery.lease_token });
     await who(`/api/adapter/runs/${c.run.id}/start`, { run_token: c.run.run_token });
     if (until(c)) return c;
     await who(`/api/adapter/runs/${c.run.id}/complete`, { run_token: c.run.run_token, body: '정리' });
@@ -1289,6 +1310,8 @@ $('body').value = '';
   await until(() => box.querySelectorAll('.merge-item').length === n, 5000, 'merge items');
   ok([...box.querySelectorAll('.merge-item')].at(-1).querySelector('.body strong')?.textContent === '글', '펼치면 옮긴 글(마크다운 렌더)');
   ok($('t-merge').hidden, '상위(메인 채팅방)엔 합치기 버튼 없음');
+  await until(() => !$('thread-list').querySelector(`a[href="#${forkId}"]`), 5000, 'merged child leaves list');
+  ok(true, '합친 하위 스레드는 목록에서 빠짐 — 상위만 남음(#962)');
   w.location.hash = forkId;
   await until(() => w.__S.detail?.thread.id === forkId && !$('t-merge').hidden, 5000, 'back to fork');
   ok($('t-merge').disabled && $('t-path').textContent.includes('상위로 합침 1번'), '합친 뒤 하위 스레드: 버튼 꺼짐 · 경로 줄에 합침 기록');

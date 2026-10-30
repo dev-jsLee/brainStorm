@@ -14,6 +14,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { RunTurn, TurnRequest, TurnResult } from '../openclaw-channel/src/worker.js';
 import { stageAttachments } from '../claude-cli/runner.js';
+import { t } from '../../src/i18n.js';
 
 export interface CodexRunnerOptions {
   /** codex 실행 파일 */
@@ -21,7 +22,8 @@ export interface CodexRunnerOptions {
   /** 작업 디렉터리 — 여기의 AGENTS.md 가 읽힌다(--cd) */
   cwd: string;
   /** 새 세션의 첫 프롬프트 머리에 실을 말(brainStorm 맥락) */
-  preamble: string;
+  /** 새 세션 첫 턴 앞머리 — 함수면 턴의 언어(claim.lang)로 고른다(마스터 #823) */
+  preamble: string | ((lang?: string) => string);
   /** `exec` 앞에 붙는 인자(예: --sandbox read-only --ask-for-approval never) */
   globalArgs: string[];
   model?: string;
@@ -88,17 +90,17 @@ export function parseEvents(stdout: string): TurnResult & { threadId: string | n
 }
 
 /** `--json` 사건 한 줄 → 화면에 보일 경과 한 줄(없으면 null) */
-export function progressOf(ev: any): string | null {
+export function progressOf(ev: any, lang?: string): string | null {
   const it = ev?.item;
   if (!it || (ev.type !== 'item.started' && ev.type !== 'item.completed')) return null;
   const one = (s: unknown, n = 120) => String(s ?? '').replace(/\s+/g, ' ').trim().slice(0, n);
-  if (ev.type === 'item.started' && it.type === 'command_execution') return `도구 shell — ${one(it.command)}`;
-  if (ev.type === 'item.started' && it.type === 'mcp_tool_call') return `도구 ${one(it.server, 40)}.${one(it.tool, 60)}`;
-  if (ev.type === 'item.started' && it.type === 'web_search') return `검색 — ${one(it.query)}`;
-  if (ev.type === 'item.completed' && it.type === 'file_change') return `파일 변경 ${Array.isArray(it.changes) ? it.changes.length : ''}건`.trim();
+  if (ev.type === 'item.started' && it.type === 'command_execution') return t(lang, 'progress.tool_what', { name: 'shell', what: one(it.command) });
+  if (ev.type === 'item.started' && it.type === 'mcp_tool_call') return t(lang, 'progress.tool', { name: `${one(it.server, 40)}.${one(it.tool, 60)}` });
+  if (ev.type === 'item.started' && it.type === 'web_search') return t(lang, 'progress.search', { q: one(it.query) });
+  if (ev.type === 'item.completed' && it.type === 'file_change') return t(lang, 'progress.file_change', { n: Array.isArray(it.changes) ? it.changes.length : '' }).replace(/\s+건$/, '').trim();
   if (ev.type === 'item.completed' && it.type === 'agent_message' && typeof it.text === 'string' && it.text.trim())
     return `«${it.text.trim().split('\n')[0].slice(0, 140)}»`;
-  if (it.type === 'reasoning') return '생각하는 중';
+  if (it.type === 'reasoning') return t(lang, 'progress.thinking');
   return null;
 }
 
@@ -127,7 +129,8 @@ export function makeCodexRunner(o: CodexRunnerOptions): RunTurn {
     const extra = o.attachDir ? await stageAttachments(req, o.attachDir) : '';
     const key = bookKey(req.sessionKey);
     const threadId = book[key] ?? null;
-    const head = !threadId && o.preamble.trim() ? `${o.preamble.trim()}\n\n` : '';
+    const pre = typeof o.preamble === 'function' ? o.preamble(req.lang) : o.preamble;
+    const head = !threadId && pre.trim() ? `${pre.trim()}\n\n` : '';
     const r = await runOnce(o, { ...req, prompt: head + req.prompt + extra }, threadId);
     if (r.threadId && r.threadId !== threadId) {
       delete book[key]; // 넣은 순서 = 최근 순서
@@ -162,7 +165,7 @@ function runOnce(o: CodexRunnerOptions, req: TurnRequest, threadId: string | nul
         const line = pending.slice(0, i);
         pending = pending.slice(i + 1);
         try {
-          const note = progressOf(JSON.parse(line));
+          const note = progressOf(JSON.parse(line), req.lang);
           if (note) req.onProgress(note);
         } catch {}
       }

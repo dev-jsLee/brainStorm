@@ -1,0 +1,273 @@
+{
+  "_doc": "단어집 — 언어 사이에 같은 개념을 같은 낱말로 옮기기 위한 표. 새 언어를 더하면 각 항목에 그 언어 칸을 더한다. 번역은 이 표를 먼저 따른다(i18n/README.md).",
+  "terms": [
+    {
+      "id": "master",
+      "ko": "마스터",
+      "en": "master",
+      "note": "The single human owner. Agents address them as the master."
+    },
+    {
+      "id": "agent",
+      "ko": "에이전트",
+      "en": "agent"
+    },
+    {
+      "id": "participant",
+      "ko": "참여자",
+      "en": "participant",
+      "note": "Master + agents."
+    },
+    {
+      "id": "thread",
+      "ko": "스레드",
+      "en": "thread",
+      "note": "A conversation branch."
+    },
+    {
+      "id": "conversation",
+      "ko": "대화",
+      "en": "conversation",
+      "note": "Generic word for a room or a thread in lists."
+    },
+    {
+      "id": "main_room",
+      "ko": "메인 채팅방",
+      "en": "main room"
+    },
+    {
+      "id": "branch",
+      "ko": "분기",
+      "en": "branch",
+      "note": "Making a child thread from a message."
+    },
+    {
+      "id": "merge",
+      "ko": "합치기",
+      "en": "merge",
+      "note": "Folding a child thread back into its parent as one bundled message."
+    },
+    {
+      "id": "recipient",
+      "ko": "수신 대상",
+      "en": "recipients",
+      "note": "Who the master calls with a message."
+    },
+    {
+      "id": "forward",
+      "ko": "전달",
+      "en": "forward",
+      "note": "Master hands an agent's message to another agent (button from a final `→ name` line)."
+    },
+    {
+      "id": "forward_note",
+      "ko": "전달 메모",
+      "en": "forward note"
+    },
+    {
+      "id": "request",
+      "ko": "요청",
+      "en": "request",
+      "note": "Agent-to-agent ask between allowed pairs. Not an instruction. Protocol word: proto.request"
+    },
+    {
+      "id": "hold",
+      "ko": "보류",
+      "en": "hold",
+      "note": "Receiver declines a request: final line `hold: reason`. Protocol word: proto.hold"
+    },
+    {
+      "id": "instruction",
+      "ko": "지시",
+      "en": "instruction",
+      "note": "Source kind: only the master's instructions are instructions."
+    },
+    {
+      "id": "quote",
+      "ko": "인용",
+      "en": "quote",
+      "note": "Source kind"
+    },
+    {
+      "id": "observation",
+      "ko": "관찰",
+      "en": "observation",
+      "note": "Source kind"
+    },
+    {
+      "id": "proposal",
+      "ko": "제안",
+      "en": "proposal",
+      "note": "Source kind"
+    },
+    {
+      "id": "source",
+      "ko": "출처",
+      "en": "source",
+      "note": "The source kind of a message."
+    },
+    {
+      "id": "run",
+      "ko": "실행",
+      "en": "run",
+      "note": "One agent execution caused by a delivery."
+    },
+    {
+      "id": "delivery",
+      "ko": "배달",
+      "en": "delivery",
+      "note": "Server → adapter handout (lease)."
+    },
+    {
+      "id": "pending_delivery",
+      "ko": "전달 대기",
+      "en": "pending delivery"
+    },
+    {
+      "id": "session",
+      "ko": "세션",
+      "en": "session"
+    },
+    {
+      "id": "generation",
+      "ko": "세대",
+      "en": "generation",
+      "note": "Session generation; rotating starts a new one."
+    },
+    {
+      "id": "rotate",
+      "ko": "세션 교체",
+      "en": "rotate session"
+    },
+    {
+      "id": "pull",
+      "ko": "끌어오기",
+      "en": "pull context",
+      "note": "Agent asks for another thread's context with a final `← title` line."
+    },
+    {
+      "id": "pause_calls",
+      "ko": "새 호출 금지",
+      "en": "pause calls",
+      "note": "Thread switch: no new agent calls."
+    },
+    {
+      "id": "face_mode",
+      "ko": "대면 모드",
+      "en": "face-to-face mode",
+      "note": "Two agents alternately edit one agreement document."
+    },
+    {
+      "id": "agreement",
+      "ko": "합의문",
+      "en": "agreement",
+      "note": "The document edited in face-to-face mode. Protocol word: proto.agreement (code fence label)."
+    },
+    {
+      "id": "question",
+      "ko": "질문",
+      "en": "question",
+      "note": "Face-to-face final line `question: …`. Protocol word: proto.question"
+    },
+    {
+      "id": "issue",
+      "ko": "안건",
+      "en": "issue",
+      "note": "An open point the master must decide in face-to-face mode."
+    },
+    {
+      "id": "contested",
+      "ko": "쟁점",
+      "en": "contested point"
+    },
+    {
+      "id": "drafter",
+      "ko": "초안 작성자",
+      "en": "drafter"
+    },
+    {
+      "id": "reviewer",
+      "ko": "검토자",
+      "en": "reviewer"
+    },
+    {
+      "id": "delegation_ledger",
+      "ko": "위임 대장",
+      "en": "delegation ledger"
+    },
+    {
+      "id": "claim",
+      "ko": "선점",
+      "en": "claim",
+      "note": "Reserving paths/resources before work."
+    },
+    {
+      "id": "side_panel",
+      "ko": "보조 패널",
+      "en": "side panel"
+    },
+    {
+      "id": "composer",
+      "ko": "작성란",
+      "en": "composer",
+      "note": "Message input box."
+    },
+    {
+      "id": "audit_log",
+      "ko": "감사 기록",
+      "en": "audit log"
+    },
+    {
+      "id": "token",
+      "ko": "토큰",
+      "en": "token"
+    },
+    {
+      "id": "passphrase",
+      "ko": "패스프레이즈",
+      "en": "passphrase"
+    },
+    {
+      "id": "archive",
+      "ko": "보관",
+      "en": "archive"
+    },
+    {
+      "id": "hide",
+      "ko": "숨김",
+      "en": "hide"
+    },
+    {
+      "id": "trash",
+      "ko": "휴지통",
+      "en": "trash"
+    },
+    {
+      "id": "attachment",
+      "ko": "첨부",
+      "en": "attachment"
+    },
+    {
+      "id": "context",
+      "ko": "맥락",
+      "en": "context"
+    },
+    {
+      "id": "unknown_state",
+      "ko": "상태 미확인",
+      "en": "unknown",
+      "note": "Run state `unknown`."
+    },
+    {
+      "id": "cancel_requested",
+      "ko": "중단 요청됨",
+      "en": "cancel requested"
+    },
+    {
+      "id": "budget",
+      "ko": "예산",
+      "en": "budget",
+      "note": "Call budget / token budget."
+    }
+  ]
+}

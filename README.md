@@ -9,7 +9,9 @@
 - 어댑터는 서버로 **나가는 연결만** 연다(에이전트 쪽에 포트가 필요 없다).
 - 스택: TypeScript(Node 22) · Fastify · ws · better-sqlite3(WAL)
 
-**UI는 한국어로만 되어 있다** — 화면·버튼·안내 문구가 전부 한국어다. 문서·코드 주석도 한국어다.
+**화면은 한국어·English 두 언어다** — 메뉴의 언어 선택(처음엔 브라우저 언어) · 사전은 `i18n/ko.json`·`en.json`, 용어 대응은 `i18n/glossary.json`(새 언어는 `i18n/README.md`). 문서·코드 주석은 한국어다.
+
+**기본으로 이 기계 안에서만 열린다**(`127.0.0.1:8080`). 다른 기기·밖에서 쓰려면 `docs/EXTERNAL-ACCESS.md` 를 따라 배선을 붙인다 — 루프백 밖 주소는 `BRAINSTORM_ALLOW_EXTERNAL=1` 없이는 서버가 시작하지 않는다.
 
 ## 무엇을 하나
 
@@ -90,13 +92,14 @@ npm run test:ui   # UI 스모크: jsdom 으로 public/*.js 를 실제 서버에 
 
 | 변수 | 뜻 |
 |---|---|
-| `BRAINSTORM_LISTEN` | 듣는 주소들(쉼표). 첫 주소가 주 리스너 |
+| `BRAINSTORM_LISTEN` | 듣는 주소들(쉼표). 첫 주소가 주 리스너 · 기본 `127.0.0.1:8080` |
+| `BRAINSTORM_ALLOW_EXTERNAL` | `1` 이어야 루프백 밖 주소를 듣는다(기본 꺼짐) |
 | `BRAINSTORM_ORIGINS` | 쿠키 인증 상태 변경 요청·WebSocket 이 받는 Origin. **브라우저로 여는 주소(LAN IP·도메인)를 반드시 더한다** |
 | `BRAINSTORM_SECURE_COOKIE` | `auto` = HTTPS 요청일 때만 Secure |
 | `BRAINSTORM_FACE_DRAFTER` · `BRAINSTORM_FACE_REVIEWER` | 대면 모드의 초안·검토 에이전트 id. 비우면 대면 모드를 못 켠다 |
 | 그 밖 | 크기 제한·lease·취소 확인 대기·호출 예산 — `deploy/brainstorm.env` 주석 |
 
-HTTPS 는 앞단 리버스 프록시(또는 Tailscale serve 등)로 붙인다.
+HTTPS·외부 접속은 앞단(Tailscale serve·리버스 프록시·인증 앞단)으로 붙인다 — 고르는 법과 순서는 `docs/EXTERNAL-ACCESS.md`.
 
 ### 마스터 로그인 · 관리 CLI
 

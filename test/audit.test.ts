@@ -283,9 +283,9 @@ describe('에이전트 연결 화면 API', () => {
     const room = await roomOf(ctx);
     // 운영 흉내: strata = 토큰 하나로 붙어 있음 · oc-main = 토큰 폐기 + 방에서 뺌
     s.createParticipant('strata', 'agent', 'Strata');
-    ctx.tokens.strata = s.createToken('strata', { label: 'ct111-openai' });
+    ctx.tokens.strata = s.createToken('strata', { label: 'host-a-openai' });
     s.createParticipant('oc-main', 'agent', 'OpenClaw');
-    ctx.tokens['oc-main'] = s.createToken('oc-main', { label: 'ct109' });
+    ctx.tokens['oc-main'] = s.createToken('oc-main', { label: 'host-a' });
     assert.equal((await ctx.agent('oc-main', 'GET', '/api/me')).status, 200);
     s.revokeToken(ctx.tokens['oc-main'].id);
     await ctx.master('POST', `/api/threads/${room}/members`, { participant_id: 'oc-main', remove: true });
@@ -300,7 +300,7 @@ describe('에이전트 연결 화면 API', () => {
     assert.equal(by.strata.room_member, true);
     assert.equal(by.strata.credential_list.length, 1);
     assert.equal(by.strata.credential_list[0].status, 'active');
-    assert.equal(by.strata.credential_list[0].label, 'ct111-openai');
+    assert.equal(by.strata.credential_list[0].label, 'host-a-openai');
     assert.ok(by.strata.credential_list[0].last_used_at > 0);
     assert.equal(by.strata.last_denied, null);
     assert.equal(by['oc-main'].state, 'revoked');
@@ -383,8 +383,8 @@ describe('마이그레이션 5 (스키마 4 DB → 새 버전 기동)', () => {
     db.prepare("INSERT INTO participants(id, kind, name, is_master, passphrase_hash, created_at) VALUES ('master','human','마스터',1,?,?)").run(hashPassphrase(MASTER_PASS), t0);
     db.prepare("INSERT INTO participants(id, kind, name, created_at) VALUES ('strata','agent','Strata',?)").run(t0);
     db.prepare("INSERT INTO participants(id, kind, name, created_at) VALUES ('oc-main','agent','OpenClaw',?)").run(t0);
-    db.prepare("INSERT INTO credentials(id, participant_id, token_hash, scope, label, created_at, last_used_at) VALUES ('cred_s','strata',?,'[\"adapter\"]','ct111',?,?)").run(sha256(live), t0, t0 + 1000);
-    db.prepare("INSERT INTO credentials(id, participant_id, token_hash, scope, label, created_at, revoked_at, last_used_at) VALUES ('cred_o','oc-main',?,'[\"adapter\"]','ct109',?,?,?)").run(sha256(dead), t0, t0 + 2000, t0 + 1500);
+    db.prepare("INSERT INTO credentials(id, participant_id, token_hash, scope, label, created_at, last_used_at) VALUES ('cred_s','strata',?,'[\"adapter\"]','host-a',?,?)").run(sha256(live), t0, t0 + 1000);
+    db.prepare("INSERT INTO credentials(id, participant_id, token_hash, scope, label, created_at, revoked_at, last_used_at) VALUES ('cred_o','oc-main',?,'[\"adapter\"]','host-a',?,?,?)").run(sha256(dead), t0, t0 + 2000, t0 + 1500);
     db.prepare("INSERT INTO threads(id, kind, title, created_by, created_at, updated_at) VALUES ('th_room','room','메인 채팅방','master',?,?)").run(t0, t0);
     for (const p of ['master', 'strata'])
       db.prepare('INSERT INTO thread_members(thread_id, participant_id, can_read, can_post, can_invoke, added_at) VALUES (?,?,1,1,?,?)').run('th_room', p, p === 'master' ? 1 : 0, t0);

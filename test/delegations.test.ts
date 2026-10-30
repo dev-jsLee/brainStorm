@@ -135,16 +135,16 @@ describe('위임 대장', () => {
   });
 
   test('done 은 선점을 놓고 그 범위가 남에게 열린다 · 끝난 위임은 다시 못 연다', async () => {
-    const a = await create([P('ct111', 'etc/brainstorm/')]);
+    const a = await create([P('host-a', 'etc/brainstorm/')]);
     const id = a.json.delegation.id;
-    assert.equal((await create([P('ct111', 'etc/')])).status, 409);
+    assert.equal((await create([P('host-a', 'etc/')])).status, 409);
     const fin = await done(id);
     assert.equal(fin.changed, true);
     assert.equal(fin.delegation.status, 'done');
     assert.equal(fin.delegation.result, '끝');
     assert.ok(fin.delegation.finished_at);
     assert.ok(fin.delegation.claims.every((c: any) => c.released_at));
-    const b = await create([P('ct111', 'etc/')]);
+    const b = await create([P('host-a', 'etc/')]);
     assert.equal(b.status, 201, '놓인 범위는 겹치지 않는다');
     assert.equal((await ctx.master('POST', `/api/delegations/${id}/status`, { status: 'running' })).status, 409);
     assert.equal((await ctx.master('POST', `/api/delegations/${id}/claims`, { claims: [P('x', 'y')] })).status, 409);
@@ -158,7 +158,7 @@ describe('위임 대장', () => {
     }
     assert.equal((await ctx.master('POST', `/api/delegations/${bid}/status`, { status: 'nope' })).status, 400);
     assert.equal((await ctx.master('POST', `/api/delegations/${bid}/status`, { status: 'cancelled' })).status, 200);
-    assert.equal((await create([P('ct111', 'etc/brainstorm/x')])).status, 201);
+    assert.equal((await create([P('host-a', 'etc/brainstorm/x')])).status, 201);
   });
 
   test('heartbeat · 강제 놓기(마스터·만든 이만) · 목록 active', async () => {

@@ -5,174 +5,174 @@
 
 /** 작업 유형 → 화면 문구 */
 const AUDIT_ACTION = {
-  'auth.login': '로그인',
-  'auth.token': '토큰 인증',
-  'credential.create': '토큰 발급',
-  'credential.revoke': '토큰 폐기',
-  'participant.create': '참여자 등록',
-  'participant.rename': '참여자 이름 변경',
-  'passphrase.set': '패스프레이즈 변경',
-  'websession.create': '웹 세션 발급',
-  'websession.revoke': '웹 세션 끊기',
-  'websession.revoke_all': '웹 세션 모두 끊기',
-  'thread.create': '스레드 생성',
-  'thread.fork': '스레드 분기',
-  'thread.read': '대화 열람',
-  'thread.post': '게시·호출',
-  'thread.stop': '새 호출 금지·현재 실행 취소',
-  'thread.resume': '호출 재개',
-  'thread.archive': '스레드 보관',
-  'thread.unarchive': '스레드 보관 해제',
-  'thread.hide': '스레드 숨김',
-  'thread.unhide': '스레드 숨김 해제',
-  'thread.trash': '스레드 휴지통',
-  'thread.restore': '스레드 복구',
-  'thread.purge': '스레드 영구 삭제',
-  'member.set': '멤버 권한 부여·변경',
-  'member.remove': '멤버 회수',
-  'session.rotate': '세션 교체',
-  'run.cancel': '실행 취소·중단',
-  'run.read': '실행 열람',
-  'run.refresh': '실행 상태 확인',
-  'runs.view': '실행 목록 조회',
-  'delivery.cancel': '전달 취소',
-  'request.create': '에이전트 간 요청',
-  'request.hold': '요청 보류',
-  'request.hold_ack': '보류된 요청 확인',
-  'request.holds_view': '보류된 요청 조회',
-  'request_pair.add': '요청 허용 짝 추가',
-  'request_pair.remove': '요청 허용 짝 삭제',
-  'audit.view': '감사 기록 조회',
-  'connections.view': '연결 상태 조회',
-  'agents.view': '에이전트 상태 조회',
-  'attachment.add': '첨부 올리기',
-  'attachment.read': '첨부 받기',
-  'adapter.claim': '어댑터 작업 가져오기',
-  'adapter.ack': '어댑터 전달 확인',
-  'adapter.run': '어댑터 실행 보고',
+  'auth.login': t('admin.action.auth.login'),
+  'auth.token': t('admin.action.auth.token'),
+  'credential.create': t('admin.action.credential.create'),
+  'credential.revoke': t('admin.action.credential.revoke'),
+  'participant.create': t('admin.action.participant.create'),
+  'participant.rename': t('admin.action.participant.rename'),
+  'passphrase.set': t('admin.action.passphrase.set'),
+  'websession.create': t('admin.action.websession.create'),
+  'websession.revoke': t('admin.action.websession.revoke'),
+  'websession.revoke_all': t('admin.action.websession.revoke_all'),
+  'thread.create': t('admin.action.thread.create'),
+  'thread.fork': t('admin.action.thread.fork'),
+  'thread.read': t('admin.action.thread.read'),
+  'thread.post': t('admin.action.thread.post'),
+  'thread.stop': t('admin.action.thread.stop'),
+  'thread.resume': t('admin.action.thread.resume'),
+  'thread.archive': t('admin.action.thread.archive'),
+  'thread.unarchive': t('admin.action.thread.unarchive'),
+  'thread.hide': t('admin.action.thread.hide'),
+  'thread.unhide': t('admin.action.thread.unhide'),
+  'thread.trash': t('admin.action.thread.trash'),
+  'thread.restore': t('admin.action.thread.restore'),
+  'thread.purge': t('admin.action.thread.purge'),
+  'member.set': t('admin.action.member.set'),
+  'member.remove': t('admin.action.member.remove'),
+  'session.rotate': t('admin.action.session.rotate'),
+  'run.cancel': t('admin.action.run.cancel'),
+  'run.read': t('admin.action.run.read'),
+  'run.refresh': t('admin.action.run.refresh'),
+  'runs.view': t('admin.action.runs.view'),
+  'delivery.cancel': t('admin.action.delivery.cancel'),
+  'request.create': t('admin.action.request.create'),
+  'request.hold': t('admin.action.request.hold'),
+  'request.hold_ack': t('admin.action.request.hold_ack'),
+  'request.holds_view': t('admin.action.request.holds_view'),
+  'request_pair.add': t('admin.action.request_pair.add'),
+  'request_pair.remove': t('admin.action.request_pair.remove'),
+  'audit.view': t('admin.action.audit.view'),
+  'connections.view': t('admin.action.connections.view'),
+  'agents.view': t('admin.action.agents.view'),
+  'attachment.add': t('admin.action.attachment.add'),
+  'attachment.read': t('admin.action.attachment.read'),
+  'adapter.claim': t('admin.action.adapter.claim'),
+  'adapter.ack': t('admin.action.adapter.ack'),
+  'adapter.run': t('admin.action.adapter.run'),
 };
 /** 이벤트 유형 필터의 묶음(정책 9 적용 범위 순) */
 const AUDIT_GROUPS = [
-  ['credential.*', '자격 증명 발급·폐기'],
-  ['member.*', '멤버 권한 부여·회수'],
-  ['session.rotate', '세션 교체'],
-  ['run.cancel', '실행 취소·중단'],
-  ['request.*', '에이전트 간 요청·보류'],
-  ['auth.*', '인증(로그인·토큰 거절)'],
-  ['audit.view', '감사 기록 조회'],
+  ['credential.*', t('admin.group.credential')],
+  ['member.*', t('admin.group.member')],
+  ['session.rotate', t('admin.group.session_rotate')],
+  ['run.cancel', t('admin.group.run_cancel')],
+  ['request.*', t('admin.group.request')],
+  ['auth.*', t('admin.group.auth')],
+  ['audit.view', t('admin.group.audit_view')],
 ];
-const AUDIT_RESULT = { ok: '성공', requested: '요청됨', noop: '변화 없음', denied: '거부', failed: '실패' };
+const AUDIT_RESULT = { ok: t('admin.result.ok'), requested: t('admin.result.requested'), noop: t('admin.result.noop'), denied: t('admin.result.denied'), failed: t('admin.result.failed') };
 /** 사유 코드 → 화면 문구. 모르는 코드는 코드 그대로 */
 const AUDIT_REASON = {
-  token_revoked: '폐기된 토큰',
-  token_expired: '만료된 토큰',
-  token_unknown: '모르는 토큰',
-  token_malformed: '토큰 형식 오류',
-  participant_disabled: '비활성 참여자',
-  not_member: '멤버 아님(열람 권한 없음)',
-  master_only: '마스터 전용',
-  adapter_scope_required: '어댑터 권한 없음',
-  impersonation: '사칭(다른 작성자로)',
-  no_post_permission: '게시 권한 없음',
-  no_invoke_permission: '호출 권한 없음',
-  agent_invocation_disabled: '에이전트 간 호출 꺼짐',
-  request_pair_not_allowed: '허용 짝이 아닌 요청',
-  request_chain_limit: '요청 연쇄 상한 — 마스터 확인 필요',
-  invoke_paused: '새 호출 금지 중',
-  already_acked: '이미 확인함',
-  already_allowed: '이미 허용됨',
-  not_allowed: '허용 짝 아님',
-  source_kind_forbidden: '에이전트는 «지시»로 못 씀',
-  bad_input_mode: '입력 방식 거부',
-  not_owner: '남의 작업',
-  not_author: '작성자 아님',
-  bad_passphrase: '패스프레이즈 틀림',
-  too_many_attempts: '시도 초과(잠김)',
-  already_revoked: '이미 폐기됨',
-  no_credential: '없는 자격 증명',
-  unchanged: '바뀐 것 없음',
-  duplicate: '같은 요청 재시도(처음 결과)',
-  already_requested: '이미 중단 요청됨',
-  already_final: '이미 끝난 실행',
-  queued_cancelled: '대기 중 취소',
-  acked: '어댑터 중단 확인',
-  no_ack: '중단 확인 없음 → 상태 미확인',
-  completed_first: '완료 우선 확정',
-  failed_first: '실패 우선 확정',
-  lease_expired: '어댑터 응답 끊김',
-  rotated: '세션 교체로 닫힘',
-  has_run: '이미 실행이 생김',
-  bad_member: '없는 참여자',
-  bad_agent: '멤버가 아닌 에이전트',
-  weak_passphrase: '패스프레이즈가 짧음',
-  not_agent: '에이전트가 아님',
-  stop_new: '새 호출 금지',
-  cancel_current: '현재 실행 취소',
-  no_session: '없는 세션',
+  token_revoked: t('admin.reason.token_revoked'),
+  token_expired: t('admin.reason.token_expired'),
+  token_unknown: t('admin.reason.token_unknown'),
+  token_malformed: t('admin.reason.token_malformed'),
+  participant_disabled: t('admin.reason.participant_disabled'),
+  not_member: t('admin.reason.not_member'),
+  master_only: t('admin.reason.master_only'),
+  adapter_scope_required: t('admin.reason.adapter_scope_required'),
+  impersonation: t('admin.reason.impersonation'),
+  no_post_permission: t('admin.reason.no_post_permission'),
+  no_invoke_permission: t('admin.reason.no_invoke_permission'),
+  agent_invocation_disabled: t('admin.reason.agent_invocation_disabled'),
+  request_pair_not_allowed: t('admin.reason.request_pair_not_allowed'),
+  request_chain_limit: t('admin.reason.request_chain_limit'),
+  invoke_paused: t('admin.reason.invoke_paused'),
+  already_acked: t('admin.reason.already_acked'),
+  already_allowed: t('admin.reason.already_allowed'),
+  not_allowed: t('admin.reason.not_allowed'),
+  source_kind_forbidden: t('admin.reason.source_kind_forbidden'),
+  bad_input_mode: t('admin.reason.bad_input_mode'),
+  not_owner: t('admin.reason.not_owner'),
+  not_author: t('admin.reason.not_author'),
+  bad_passphrase: t('admin.reason.bad_passphrase'),
+  too_many_attempts: t('admin.reason.too_many_attempts'),
+  already_revoked: t('admin.reason.already_revoked'),
+  no_credential: t('admin.reason.no_credential'),
+  unchanged: t('admin.reason.unchanged'),
+  duplicate: t('admin.reason.duplicate'),
+  already_requested: t('admin.reason.already_requested'),
+  already_final: t('admin.reason.already_final'),
+  queued_cancelled: t('admin.reason.queued_cancelled'),
+  acked: t('admin.reason.acked'),
+  no_ack: t('admin.reason.no_ack'),
+  completed_first: t('admin.reason.completed_first'),
+  failed_first: t('admin.reason.failed_first'),
+  lease_expired: t('admin.reason.lease_expired'),
+  rotated: t('admin.reason.rotated'),
+  has_run: t('admin.reason.has_run'),
+  bad_member: t('admin.reason.bad_member'),
+  bad_agent: t('admin.reason.bad_agent'),
+  weak_passphrase: t('admin.reason.weak_passphrase'),
+  not_agent: t('admin.reason.not_agent'),
+  stop_new: t('admin.reason.stop_new'),
+  cancel_current: t('admin.reason.cancel_current'),
+  no_session: t('admin.reason.no_session'),
 };
 /** 상태 칸(before/after) 키 → 화면 문구 */
 const AUDIT_KEY = {
-  state: '실행 상태',
-  status: '상태',
-  member: '멤버',
-  can_read: '읽기',
-  can_post: '게시',
-  can_invoke: '호출',
-  generation: '세대',
-  session_id: '세션',
-  cancelled_runs: '닫힌 실행',
-  cancel_requested_runs: '중단 요청한 실행',
-  withdrawn_deliveries: '거둔 전달',
-  invoke_paused: '새 호출 금지',
-  participant_id: '참여자',
-  label: '라벨',
-  scope: '범위',
-  expires_at: '만료',
-  revoked_at: '폐기 시각',
-  members: '멤버',
-  default_recipient: '기본 수신자',
-  parent_thread_id: '부모 대화',
-  fork_seq: '분기 시점',
-  included: '가져온 메시지',
-  reason: '사유',
-  confirmed_by: '확인한 어댑터',
-  ack_limit_ms: '무응답 제한',
-  cancel_requested: '중단 요청',
-  via: '경로',
-  ip: '주소',
-  filters: '조건',
-  page: '쪽',
-  kind: '구분',
-  is_master: '마스터',
-  room_member: '메인 채팅방 멤버',
-  name: '이름',
-  minutes: '유효(분)',
-  removed: '끊은 세션',
-  web_sessions_removed: '끊은 웹 세션',
-  run_id: '실행',
-  recipient_id: '수신자',
-  message_seq: '메시지',
-  status_code: '응답 코드',
+  state: t('admin.key.state'),
+  status: t('admin.key.status'),
+  member: t('admin.key.member'),
+  can_read: t('admin.key.can_read'),
+  can_post: t('admin.key.can_post'),
+  can_invoke: t('admin.key.can_invoke'),
+  generation: t('admin.key.generation'),
+  session_id: t('admin.key.session_id'),
+  cancelled_runs: t('admin.key.cancelled_runs'),
+  cancel_requested_runs: t('admin.key.cancel_requested_runs'),
+  withdrawn_deliveries: t('admin.key.withdrawn_deliveries'),
+  invoke_paused: t('admin.key.invoke_paused'),
+  participant_id: t('admin.key.participant_id'),
+  label: t('admin.key.label'),
+  scope: t('admin.key.scope'),
+  expires_at: t('admin.key.expires_at'),
+  revoked_at: t('admin.key.revoked_at'),
+  members: t('admin.key.members'),
+  default_recipient: t('admin.key.default_recipient'),
+  parent_thread_id: t('admin.key.parent_thread_id'),
+  fork_seq: t('admin.key.fork_seq'),
+  included: t('admin.key.included'),
+  reason: t('admin.key.reason'),
+  confirmed_by: t('admin.key.confirmed_by'),
+  ack_limit_ms: t('admin.key.ack_limit_ms'),
+  cancel_requested: t('admin.key.cancel_requested'),
+  via: t('admin.key.via'),
+  ip: t('admin.key.ip'),
+  filters: t('admin.key.filters'),
+  page: t('admin.key.page'),
+  kind: t('admin.key.kind'),
+  is_master: t('admin.key.is_master'),
+  room_member: t('admin.key.room_member'),
+  name: t('admin.key.name'),
+  minutes: t('admin.key.minutes'),
+  removed: t('admin.key.removed'),
+  web_sessions_removed: t('admin.key.web_sessions_removed'),
+  run_id: t('admin.key.run_id'),
+  recipient_id: t('admin.key.recipient_id'),
+  message_seq: t('admin.key.message_seq'),
+  status_code: t('admin.key.status_code'),
 };
 
 function actorLabel(id, kind) {
-  if (kind === 'cli' || id === 'cli:root') return '관리 CLI (root)';
-  if (kind === 'server' || id === 'server') return '서버';
-  if (kind === 'anonymous' || id === 'anonymous') return '알 수 없음';
+  if (kind === 'cli' || id === 'cli:root') return t('admin.actor_cli');
+  if (kind === 'server' || id === 'server') return t('admin.actor_server');
+  if (kind === 'anonymous' || id === 'anonymous') return t('admin.actor_unknown');
   const p = S.participants.get(id);
   if (!p) return id;
-  return p.is_master ? `${p.name} (마스터)` : p.name;
+  return p.is_master ? t('admin.actor_master', { name: p.name }) : p.name;
 }
 function auditActionLabel(a) {
   return AUDIT_ACTION[a] ?? a;
 }
 function fmtVal(k, v) {
-  if (v === null || v === undefined) return '없음';
-  if (typeof v === 'boolean') return v ? '예' : '아니오';
-  if (Array.isArray(v)) return v.length ? v.map((x) => (typeof x === 'string' ? pname(x) : String(x))).join(', ') : '없음';
+  if (v === null || v === undefined) return t('admin.none');
+  if (typeof v === 'boolean') return v ? t('admin.yes') : t('admin.no');
+  if (Array.isArray(v)) return v.length ? v.map((x) => (typeof x === 'string' ? pname(x) : String(x))).join(', ') : t('admin.none');
   if (typeof v === 'object') return Object.entries(v).map(([kk, vv]) => `${AUDIT_KEY[kk] ?? kk} ${fmtVal(kk, vv)}`).join(' · ');
   if (typeof v === 'number' && /_at$/.test(k)) return when(v);
-  if (k === 'ack_limit_ms') return `${Math.round(v / 1000)}초`;
+  if (k === 'ack_limit_ms') return t('admin.seconds', { n: Math.round(v / 1000) });
   if (k === 'state') return STATE[v] ?? v;
   if (k === 'participant_id' || k === 'confirmed_by' || k === 'recipient_id' || k === 'default_recipient') return pname(v);
   if (k === 'parent_thread_id') return threadById(v)?.title ?? v;
@@ -189,15 +189,15 @@ function auditTarget(e) {
   const owner = e.after?.participant_id ?? e.before?.participant_id;
   const th = e.thread_id ? threadById(e.thread_id) : null;
   const parts = [];
-  if (e.target_type === 'credential') parts.push(`자격 증명 ${e.target_id}${owner ? ` · ${pname(owner)}` : ''}`);
-  else if (e.target_type === 'participant' || e.target_type === 'agent') parts.push(e.target_id ? `${e.target_type === 'agent' ? '에이전트' : '참여자'} ${pname(e.target_id)}` : '참여자');
-  else if (e.target_type === 'thread') parts.push(th ? '' : `대화 ${e.target_id}`);
-  else if (e.target_type === 'run') parts.push(`실행 ${shortId(e.target_id)}`);
-  else if (e.target_type === 'delivery') parts.push(`전달 ${shortId(e.target_id)}`);
-  else if (e.target_type === 'audit') parts.push('감사 기록');
-  else if (e.target_type === 'web_session') parts.push('웹 세션');
+  if (e.target_type === 'credential') parts.push(`${t('admin.tgt_credential', { id: e.target_id })}${owner ? ` · ${pname(owner)}` : ''}`);
+  else if (e.target_type === 'participant' || e.target_type === 'agent') parts.push(e.target_id ? t(e.target_type === 'agent' ? 'admin.tgt_agent' : 'admin.tgt_participant', { name: pname(e.target_id) }) : t('admin.participant'));
+  else if (e.target_type === 'thread') parts.push(th ? '' : t('admin.tgt_thread', { id: e.target_id }));
+  else if (e.target_type === 'run') parts.push(t('admin.tgt_run', { id: shortId(e.target_id) }));
+  else if (e.target_type === 'delivery') parts.push(t('admin.tgt_delivery', { id: shortId(e.target_id) }));
+  else if (e.target_type === 'audit') parts.push(t('admin.audit_log'));
+  else if (e.target_type === 'web_session') parts.push(t('admin.web_session'));
   else if (e.target_type) parts.push(`${e.target_type} ${e.target_id ?? ''}`);
-  const scope = th ? convLabel(th.kind, th.title) : e.thread_id ? el('span', { class: 'faint' }, `대화 ${shortId(e.thread_id)}`) : null;
+  const scope = th ? convLabel(th.kind, th.title) : e.thread_id ? el('span', { class: 'faint' }, t('admin.tgt_thread', { id: shortId(e.thread_id) })) : null;
   const txt = parts.filter(Boolean).join(' ');
   if (!txt && !scope) return el('span', { class: 'faint' }, '—');
   return el('span', { class: 'tgt' }, txt, txt && scope ? el('span', { class: 'faint' }, ' · ') : null, scope);
@@ -262,7 +262,7 @@ async function loadAudit() {
   try {
     r = await api('GET', `/api/audit?${p}`);
   } catch (e) {
-    if (my === auSeq) $('au-table').replaceChildren(el('p', { class: 'err' }, `감사 기록을 불러오지 못했습니다: ${e.message}`));
+    if (my === auSeq) $('au-table').replaceChildren(el('p', { class: 'err' }, t('admin.audit_load_failed', { error: e.message })));
     return;
   }
   if (my !== auSeq) return;
@@ -277,13 +277,13 @@ function fillAuditFilters() {
   const known = new Set(AUDIT_GROUPS.map((g) => g[0]));
   const acts = [...new Set([...(r?.actions ?? []), ...(q.action && !known.has(q.action) ? [q.action] : [])])].sort();
   $('af-action').replaceChildren(
-    el('option', { value: '' }, '전체'),
-    el('optgroup', { label: '묶음' }, ...AUDIT_GROUPS.map(([v, t]) => el('option', { value: v }, t))),
-    el('optgroup', { label: '개별 유형' }, ...acts.map((a) => el('option', { value: a }, `${auditActionLabel(a)} (${a})`))),
+    el('option', { value: '' }, t('admin.all')),
+    el('optgroup', { label: t('admin.filter_groups') }, ...AUDIT_GROUPS.map(([v, label]) => el('option', { value: v }, label))),
+    el('optgroup', { label: t('admin.filter_single') }, ...acts.map((a) => el('option', { value: a }, `${auditActionLabel(a)} (${a})`))),
   );
   const actors = [...(r?.actors ?? [])];
   if (q.actor && !actors.some((a) => a.id === q.actor)) actors.push({ id: q.actor, kind: '' });
-  $('af-actor').replaceChildren(el('option', { value: '' }, '전체'), ...actors.map((a) => el('option', { value: a.id }, actorLabel(a.id, a.kind))));
+  $('af-actor').replaceChildren(el('option', { value: '' }, t('admin.all')), ...actors.map((a) => el('option', { value: a.id }, actorLabel(a.id, a.kind))));
   $('af-q').value = q.q;
   $('af-action').value = q.action;
   $('af-actor').value = q.actor;
@@ -297,10 +297,10 @@ function fillAuditFilters() {
     loadAudit();
   };
   if (q.thread) {
-    const t = threadById(q.thread);
-    chips.push(el('span', { class: 'chip on' }, `대화: ${t ? t.title : q.thread}`, el('button', { type: 'button', class: 'icon', 'aria-label': '대화 조건 지우기', onclick: drop('thread') }, '×')));
+    const th = threadById(q.thread);
+    chips.push(el('span', { class: 'chip on' }, t('admin.chip_thread', { title: th ? th.title : q.thread }), el('button', { type: 'button', class: 'icon', 'aria-label': t('admin.chip_thread_clear'), onclick: drop('thread') }, '×')));
   }
-  if (q.corr) chips.push(el('span', { class: 'chip on' }, `감사 식별자: ${q.corr}`, el('button', { type: 'button', class: 'icon', 'aria-label': '감사 식별자 조건 지우기', onclick: drop('corr') }, '×')));
+  if (q.corr) chips.push(el('span', { class: 'chip on' }, t('admin.chip_corr', { id: q.corr }), el('button', { type: 'button', class: 'icon', 'aria-label': t('admin.chip_corr_clear'), onclick: drop('corr') }, '×')));
   $('af-chips').replaceChildren(...chips);
 }
 function auditWhen(e) {
@@ -308,7 +308,7 @@ function auditWhen(e) {
     'span',
     {},
     when(e.requested_at),
-    e.repeat_count > 1 ? el('div', { class: 'faint small' }, `외 ${e.repeat_count - 1}회 · 마지막 ${when(e.last_at)}`) : null,
+    e.repeat_count > 1 ? el('div', { class: 'faint small' }, t('admin.repeat_more', { n: e.repeat_count - 1, at: when(e.last_at) })) : null,
   );
 }
 function auditDetail(e) {
@@ -316,17 +316,17 @@ function auditDetail(e) {
     'div',
     { class: 'au-detail' },
     kvList(
-      ['감사 식별자', el('span', {}, el('code', {}, e.corr_id), ' ', el('a', { href: `#audit?corr=${encodeURIComponent(e.corr_id)}&since=` }, '연결된 기록 보기'))],
-      ['작업 유형', `${auditActionLabel(e.action)} (${e.action})`],
-      ['수행자', `${actorLabel(e.actor_id, e.actor_kind)} — ${e.actor_id}`],
-      ['대상', e.target_id ? `${e.target_type} ${e.target_id}` : e.target_type ?? '—'],
-      e.thread_id ? ['대화 범위', el('a', { href: `#${e.thread_id}` }, threadById(e.thread_id)?.title ?? e.thread_id)] : null,
-      ['요청 시각', when(e.requested_at)],
-      ['처리 시각', when(e.processed_at)],
-      ['결과', el('span', {}, resultBadge(e), e.reason ? ` ${AUDIT_REASON[e.reason] ?? e.reason} (${e.reason})` : '')],
-      e.repeat_count > 1 ? ['묶음', `${e.repeat_count}회 — 같은 수행자·유형·결과·사유가 1분 안에 반복됨 · 마지막 ${when(e.last_at)}`] : null,
-      ['이전 상태', stateKv(e.before)],
-      ['결과 상태', stateKv(e.after)],
+      [t('admin.corr_id'), el('span', {}, el('code', {}, e.corr_id), ' ', el('a', { href: `#audit?corr=${encodeURIComponent(e.corr_id)}&since=` }, t('admin.related_entries')))],
+      [t('admin.action_type'), `${auditActionLabel(e.action)} (${e.action})`],
+      [t('admin.actor'), `${actorLabel(e.actor_id, e.actor_kind)} — ${e.actor_id}`],
+      [t('admin.target'), e.target_id ? `${e.target_type} ${e.target_id}` : e.target_type ?? '—'],
+      e.thread_id ? [t('admin.thread_scope'), el('a', { href: `#${e.thread_id}` }, threadById(e.thread_id)?.title ?? e.thread_id)] : null,
+      [t('admin.requested_at'), when(e.requested_at)],
+      [t('admin.processed_at'), when(e.processed_at)],
+      [t('admin.result'), el('span', {}, resultBadge(e), e.reason ? ` ${AUDIT_REASON[e.reason] ?? e.reason} (${e.reason})` : '')],
+      e.repeat_count > 1 ? [t('admin.grouped'), t('admin.grouped_text', { n: e.repeat_count, at: when(e.last_at) })] : null,
+      [t('admin.before'), stateKv(e.before)],
+      [t('admin.after'), stateKv(e.after)],
     ),
   );
 }
@@ -338,10 +338,10 @@ function closeAuditDetail() {
 function renderAuditTable() {
   const r = S.auData;
   if (!r) return;
-  $('au-total').textContent = `총 ${r.total.toLocaleString('ko-KR')}건`;
+  $('au-total').textContent = t('admin.total', { n: r.total.toLocaleString(I18N.locale) });
   const narrow = isNarrow();
   if (!r.entries.length) {
-    $('au-table').replaceChildren(el('p', { class: 'muted empty-runs' }, '조건에 맞는 기록이 없습니다.'));
+    $('au-table').replaceChildren(el('p', { class: 'muted empty-runs' }, t('admin.audit_empty')));
   } else if (narrow) {
     $('au-table').replaceChildren(
       el(
@@ -382,7 +382,7 @@ function renderAuditTable() {
       el(
         'table',
         { class: 'rtable autable' },
-        el('thead', {}, el('tr', {}, ...['타임스탬프', '이벤트 유형', '수행자', '대상·범위', '결과', '상세'].map((h) => el('th', { scope: 'col' }, h)))),
+        el('thead', {}, el('tr', {}, ...[t('admin.th_time'), t('admin.th_event'), t('admin.actor'), t('admin.th_target'), t('admin.result'), t('admin.th_detail')].map((h) => el('th', { scope: 'col' }, h)))),
         el('tbody', {}, ...rows),
       ),
     );
@@ -401,7 +401,7 @@ function auditToggle(e, open) {
         renderAuditTable();
       },
     },
-    open ? '접기' : '보기',
+    open ? t('admin.collapse') : t('admin.view'),
   );
 }
 function renderAuditPager() {
@@ -417,12 +417,12 @@ function renderAuditPager() {
   const nums = new Set([1, r.pages, r.page - 1, r.page, r.page + 1].filter((n) => n >= 1 && n <= r.pages));
   const list = [...nums].sort((a, b) => a - b);
   const items = [];
-  items.push(el('button', { type: 'button', disabled: r.page <= 1, onclick: go(r.page - 1) }, '이전'));
+  items.push(el('button', { type: 'button', disabled: r.page <= 1, onclick: go(r.page - 1) }, t('admin.prev')));
   list.forEach((n, i) => {
     if (i && n - list[i - 1] > 1) items.push(el('span', { class: 'faint' }, '…'));
     items.push(el('button', { type: 'button', class: n === r.page ? 'cur' : '', 'aria-current': n === r.page ? 'page' : null, onclick: go(n) }, String(n)));
   });
-  items.push(el('button', { type: 'button', disabled: r.page >= r.pages, onclick: go(r.page + 1) }, '다음'));
+  items.push(el('button', { type: 'button', disabled: r.page >= r.pages, onclick: go(r.page + 1) }, t('admin.next')));
   $('au-pages').replaceChildren(...items);
 }
 
@@ -438,32 +438,33 @@ async function loadConnections() {
   try {
     r = await api('GET', '/api/connections');
   } catch (e) {
-    if (my === agSeq) $('ag-list').replaceChildren(el('p', { class: 'err' }, `연결 상태를 불러오지 못했습니다: ${e.message}`));
+    if (my === agSeq) $('ag-list').replaceChildren(el('p', { class: 'err' }, t('admin.conn_load_failed', { error: e.message })));
     return;
   }
   if (my !== agSeq) return;
   S.conn = r;
   S.agents = new Map(r.agents.map((a) => [a.id, a]));
-  $('ag-checked').textContent = `마지막 확인 ${when(r.now)}`;
+  $('ag-checked').textContent = t('admin.last_checked', { at: when(r.now) });
   renderConnections();
 }
-const DENY_TXT = { token_revoked: '폐기된 토큰으로 접속 시도', token_expired: '만료된 토큰으로 접속 시도', participant_disabled: '비활성 참여자의 토큰' };
+const DENY_TXT = { token_revoked: t('admin.deny.token_revoked'), token_expired: t('admin.deny.token_expired'), participant_disabled: t('admin.deny.participant_disabled') };
 /** 연결 준비 상태(2.1 «초기 설정 · 연결 중 · 준비 완료 · 연결 실패»를 서버가 아는 신호로) */
 function readiness(a) {
-  if (a.state === 'no_credential') return { cls: 'off', word: '토큰 없음', text: '발급된 토큰이 없어 어댑터가 붙을 수 없습니다 — CT 안에서 발급하세요' };
-  if (a.state === 'revoked') return { cls: 'off', word: '폐기됨', text: `유효한 토큰이 없습니다(폐기·만료)${a.last_seen_at ? ` · 마지막 접속 ${rel(a.last_seen_at)}` : ''}` };
-  if (a.state === 'never') return { cls: '', word: '연결 대기', text: '유효한 토큰은 있지만 한 번도 접속하지 않았습니다 — 어댑터 설정·실행을 확인하세요' };
+  if (a.state === 'no_credential') return { cls: 'off', word: t('admin.rd.no_credential'), text: t('admin.rd.no_credential_text') };
+  if (a.state === 'revoked') return { cls: 'off', word: t('admin.revoked'), text: a.last_seen_at ? t('admin.rd.revoked_text_seen', { ago: rel(a.last_seen_at) }) : t('admin.rd.revoked_text') };
+  if (a.state === 'never') return { cls: '', word: t('admin.rd.never'), text: t('admin.rd.never_text') };
   const age = Date.now() - a.last_seen_at;
-  if (age < 60_000) return { cls: 'on', word: '연결됨', text: `마지막 접속 ${Math.max(1, Math.floor(age / 1000))}초 전(어댑터는 폴링마다 인증합니다)` };
-  return { cls: 'stale', word: '오래 조용함', text: `마지막 접속 ${rel(a.last_seen_at)} — 어댑터가 꺼졌거나 멈췄을 수 있습니다` };
+  if (age < 60_000) return { cls: 'on', word: t('admin.rd.on'), text: t('admin.rd.on_text', { n: Math.max(1, Math.floor(age / 1000)) }) };
+  return { cls: 'stale', word: t('admin.rd.stale'), text: t('admin.rd.stale_text', { ago: rel(a.last_seen_at) }) };
 }
 /** «폐기된 에이전트 숨기기» — 유효한 토큰이 하나도 없는(state revoked) 에이전트를 목록에서 뺀다. 이 브라우저에만 기억(기본 숨김) */
 const AG_HIDE_KEY = 'bs.agents.hideRevoked';
+const credStatusLabel = (s) => ({ active: t('admin.cred_active'), revoked: t('admin.revoked'), expired: t('admin.cred_expired') })[s];
 const agHideRevoked = () => store(AG_HIDE_KEY) !== '0';
 function renderConnections() {
   const r = S.conn;
   if (!r) return;
-  if (!r.agents.length) return $('ag-list').replaceChildren(el('p', { class: 'muted' }, '등록된 에이전트가 없습니다. CT 안에서 brainstorm-admin participant add 로 등록합니다.'));
+  if (!r.agents.length) return $('ag-list').replaceChildren(el('p', { class: 'muted' }, t('admin.no_agents')));
   const hide = agHideRevoked();
   $('ag-hide-revoked').checked = hide;
   const hidden = hide ? r.agents.filter((a) => a.state === 'revoked') : [];
@@ -474,21 +475,21 @@ function renderConnections() {
   };
   $('ag-list').replaceChildren(
     hidden.length
-      ? el('p', { class: 'muted small ag-hidden-note' }, `폐기된 에이전트 ${hidden.length}개 숨김(${hidden.map((a) => a.name).join(', ')}) `, el('button', { type: 'button', class: 'small-btn', onclick: showAll }, '보기'))
+      ? el('p', { class: 'muted small ag-hidden-note' }, `${t('admin.hidden_revoked', { n: hidden.length, names: hidden.map((a) => a.name).join(', ') })} `, el('button', { type: 'button', class: 'small-btn', onclick: showAll }, t('admin.show_hidden')))
       : null,
-    shown.length ? null : el('p', { class: 'muted' }, '보이는 에이전트가 없습니다 — 모두 폐기됐습니다.'),
+    shown.length ? null : el('p', { class: 'muted' }, t('admin.no_visible_agents')),
     ...shown.map((a) => {
       const rd = readiness(a);
       const credRows = a.credential_list.map((c) =>
         el(
           'tr',
           { class: c.status === 'active' ? '' : 'dim', 'data-cred': c.id },
-          el('td', {}, c.label ?? el('span', { class: 'faint' }, '라벨 없음'), el('div', { class: 'faint small' }, el('code', {}, c.id))),
-          el('td', {}, el('span', { class: `badge cr-${c.status}` }, { active: '유효', revoked: '폐기됨', expired: '만료됨' }[c.status])),
+          el('td', {}, c.label ?? el('span', { class: 'faint' }, t('admin.no_label')), el('div', { class: 'faint small' }, el('code', {}, c.id))),
+          el('td', {}, el('span', { class: `badge cr-${c.status}` }, credStatusLabel(c.status))),
           el('td', {}, when(c.created_at)),
-          el('td', {}, c.status === 'revoked' ? when(c.revoked_at) : c.expires_at ? when(c.expires_at) : el('span', { class: 'faint' }, '없음')),
-          el('td', {}, c.last_used_at ? `${when(c.last_used_at)} (${rel(c.last_used_at)})` : el('span', { class: 'faint' }, '한 번도 안 씀')),
-          el('td', {}, c.status === 'active' ? el('button', { type: 'button', class: 'danger small-btn', onclick: () => revokeAsk(a, c) }, '폐기') : el('span', { class: 'faint' }, '—')),
+          el('td', {}, c.status === 'revoked' ? when(c.revoked_at) : c.expires_at ? when(c.expires_at) : el('span', { class: 'faint' }, t('admin.none'))),
+          el('td', {}, c.last_used_at ? `${when(c.last_used_at)} (${rel(c.last_used_at)})` : el('span', { class: 'faint' }, t('admin.never_used'))),
+          el('td', {}, c.status === 'active' ? el('button', { type: 'button', class: 'danger small-btn', onclick: () => revokeAsk(a, c) }, t('admin.revoke')) : el('span', { class: 'faint' }, '—')),
         ),
       );
       const deniedLink = `#audit?actor=${encodeURIComponent(a.id)}&action=auth.token&result=denied&since=`;
@@ -503,18 +504,18 @@ function renderConnections() {
           el('code', { class: 'faint' }, a.id),
           el('span', { class: `pill ag-${a.state}` }, rd.word),
           el('span', { class: 'spacer' }),
-          el('a', { href: `#audit?actor=${encodeURIComponent(a.id)}&since=`, class: 'small' }, '감사 기록'),
+          el('a', { href: `#audit?actor=${encodeURIComponent(a.id)}&since=`, class: 'small' }, t('admin.audit_log')),
         ),
         el('p', { class: 'ag-ready small' }, rd.text),
         kvList(
-          ['메인 채팅방', a.room_member ? '멤버' : el('span', { class: 'alertish' }, '멤버 아님(방에서 빠짐)')],
-          ['읽을 수 있는 대화', `${a.threads}개`],
-          ['실행', a.runs.last_at ? `진행 ${a.runs.active} · 마지막 ${rel(a.runs.last_at)} ${a.runs.last_state ? `(${STATE[a.runs.last_state] ?? a.runs.last_state})` : ''}` : '아직 없음'],
+          [t('admin.main_room'), a.room_member ? t('admin.member') : el('span', { class: 'alertish' }, t('admin.not_member_left'))],
+          [t('admin.readable_threads'), t('admin.n_threads', { n: a.threads })],
+          [t('admin.runs'), a.runs.last_at ? t('admin.runs_summary', { active: a.runs.active, ago: rel(a.runs.last_at), state: a.runs.last_state ? `(${STATE[a.runs.last_state] ?? a.runs.last_state})` : '' }) : t('admin.runs_none')],
           [
-            '서버가 거절한 마지막 연결',
+            t('admin.last_denied'),
             a.last_denied
-              ? el('span', { class: 'alertish' }, `${DENY_TXT[a.last_denied.reason] ?? AUDIT_REASON[a.last_denied.reason] ?? a.last_denied.reason} · ${rel(a.last_denied.at)}${a.last_denied.count > 1 ? ` · 그 1분 묶음에 ${a.last_denied.count}회` : ''} `, el('a', { href: deniedLink }, '기록'))
-              : el('span', { class: 'faint' }, '없음'),
+              ? el('span', { class: 'alertish' }, `${DENY_TXT[a.last_denied.reason] ?? AUDIT_REASON[a.last_denied.reason] ?? a.last_denied.reason} · ${rel(a.last_denied.at)}${a.last_denied.count > 1 ? ` · ${t('admin.denied_count', { n: a.last_denied.count })}` : ''} `, el('a', { href: deniedLink }, t('admin.log_link')))
+              : el('span', { class: 'faint' }, t('admin.none')),
           ],
         ),
         a.credential_list.length && isNarrow()
@@ -525,13 +526,13 @@ function renderConnections() {
                 el(
                   'li',
                   { class: `rcard${c.status === 'active' ? '' : ' dim'}`, 'data-cred': c.id },
-                  el('div', { class: 'rc1' }, el('span', { class: `badge cr-${c.status}` }, { active: '유효', revoked: '폐기됨', expired: '만료됨' }[c.status]), el('b', {}, c.label ?? '라벨 없음'), el('code', { class: 'faint small' }, c.id)),
+                  el('div', { class: 'rc1' }, el('span', { class: `badge cr-${c.status}` }, credStatusLabel(c.status)), el('b', {}, c.label ?? t('admin.no_label')), el('code', { class: 'faint small' }, c.id)),
                   el(
                     'div',
                     { class: 'rc2 muted small' },
-                    `발급 ${when(c.created_at)} · ${c.status === 'revoked' ? `폐기 ${when(c.revoked_at)}` : c.expires_at ? `만료 ${when(c.expires_at)}` : '만료 없음'} · ${c.last_used_at ? `마지막 사용 ${rel(c.last_used_at)}` : '한 번도 안 씀'}`,
+                    `${t('admin.cred_issued', { at: when(c.created_at) })} · ${c.status === 'revoked' ? t('admin.cred_revoked_at', { at: when(c.revoked_at) }) : c.expires_at ? t('admin.cred_expires_at', { at: when(c.expires_at) }) : t('admin.no_expiry')} · ${c.last_used_at ? t('admin.last_used', { ago: rel(c.last_used_at) }) : t('admin.never_used')}`,
                   ),
-                  c.status === 'active' ? el('div', { class: 'rc3' }, el('button', { type: 'button', class: 'danger small-btn', onclick: () => revokeAsk(a, c) }, '폐기')) : null,
+                  c.status === 'active' ? el('div', { class: 'rc3' }, el('button', { type: 'button', class: 'danger small-btn', onclick: () => revokeAsk(a, c) }, t('admin.revoke'))) : null,
                 ),
               ),
             )
@@ -539,27 +540,27 @@ function renderConnections() {
           ? el(
               'table',
               { class: 'hist ag-creds' },
-              el('thead', {}, el('tr', {}, ...['라벨 · ID', '상태', '발급', '만료·폐기', '마지막 사용', ''].map((h) => el('th', { scope: 'col' }, h)))),
+              el('thead', {}, el('tr', {}, ...[t('admin.th_label_id'), t('admin.th_status'), t('admin.th_issued'), t('admin.th_exp_rev'), t('admin.th_last_used'), ''].map((h) => el('th', { scope: 'col' }, h)))),
               el('tbody', {}, ...credRows),
             )
-          : el('p', { class: 'muted small' }, '발급된 토큰이 없습니다.'),
+          : el('p', { class: 'muted small' }, t('admin.no_tokens')),
       );
     }),
   );
 }
 async function revokeAsk(a, c) {
   const ok = await ask({
-    title: '토큰 폐기',
-    text: `${a.name}의 토큰 «${c.label ?? c.id}»을 폐기합니다. 이 토큰을 쓰는 어댑터는 바로 401을 받고, 붙어 있던 실시간 연결도 몇 초 안에 끊깁니다. 되돌릴 수 없습니다 — 다시 붙이려면 CT 안에서 새 토큰을 발급해야 합니다.`,
-    ok: '폐기',
+    title: t('admin.revoke_title'),
+    text: t('admin.revoke_text', { name: a.name, label: c.label ?? c.id }),
+    ok: t('admin.revoke'),
     danger: true,
   });
   if (!ok) return;
   try {
     const r = await api('POST', `/api/credentials/${encodeURIComponent(c.id)}/revoke`);
-    announce(r.outcome === 'revoked' ? `${a.name} 토큰을 폐기했습니다` : '이미 폐기된 토큰입니다');
+    announce(r.outcome === 'revoked' ? t('admin.revoked_done', { name: a.name }) : t('admin.already_revoked'));
   } catch (e) {
-    await notify('폐기 안 됨', e.message);
+    await notify(t('admin.revoke_failed'), e.message);
   }
   await loadConnections();
 }
@@ -574,12 +575,12 @@ async function showMembers(params) {
   await loadMembers();
 }
 function fillMemberThreads() {
-  $('mb-thread').replaceChildren(...S.threads.map((t) => el('option', { value: t.id }, `${t.kind === 'room' ? '[채팅방] ' : ''}${pathOf(t)}`)));
+  $('mb-thread').replaceChildren(...S.threads.map((th) => el('option', { value: th.id }, `${th.kind === 'room' ? `${t('admin.room_tag')} ` : ''}${pathOf(th)}`)));
   if (S.mbThread) $('mb-thread').value = S.mbThread;
 }
 let mbSeq = 0;
 async function loadMembers() {
-  if (!S.mbThread) return $('mb-table').replaceChildren(el('p', { class: 'muted' }, '대화가 없습니다.'));
+  if (!S.mbThread) return $('mb-table').replaceChildren(el('p', { class: 'muted' }, t('admin.no_threads')));
   const my = ++mbSeq;
   const th = S.mbThread;
   try {
@@ -587,7 +588,7 @@ async function loadMembers() {
     if (my !== mbSeq) return;
     S.mbDetail = d;
   } catch (e) {
-    if (my === mbSeq) $('mb-table').replaceChildren(el('p', { class: 'err' }, `불러오지 못했습니다: ${e.message}`));
+    if (my === mbSeq) $('mb-table').replaceChildren(el('p', { class: 'err' }, t('admin.load_failed', { error: e.message })));
     return;
   }
   renderMembers();
@@ -595,7 +596,7 @@ async function loadMembers() {
 function renderMembers() {
   const d = S.mbDetail;
   if (!d || S.mode !== 'members') return;
-  const t = d.thread;
+  const thr = d.thread;
   const mem = new Map(d.members.map((m) => [m.participant_id, m]));
   const agents = [...S.participants.values()].filter((p) => p.kind === 'agent' && !p.disabled);
   const master = [...S.participants.values()].find((p) => p.is_master);
@@ -608,36 +609,36 @@ function renderMembers() {
   };
   const rowFor = (p) => {
     const m = mem.get(p.id);
-    const isDefault = t.default_recipient === p.id;
+    const isDefault = thr.default_recipient === p.id;
     const cells = [
-      el('span', {}, el('b', {}, p.name), ' ', el('code', { class: 'faint' }, p.id), isDefault ? el('div', { class: 'faint small' }, '기본 수신자') : null),
-      cb(`${p.name} 멤버`, !!m, false, (i) => changeMember(p, i.checked ? { can_read: true, can_post: true } : { remove: true }), { 'data-k': 'member' }),
-      cb(`${p.name} 읽기`, !!m?.can_read, !m, (i) => changeMember(p, { can_read: i.checked, can_post: i.checked ? !!m.can_post : false }), { 'data-k': 'read' }),
-      cb(`${p.name} 게시`, !!m?.can_post, !m || !m.can_read, (i) => changeMember(p, { can_read: true, can_post: i.checked }), { 'data-k': 'post' }),
-      el('span', { class: 'faint small' }, '꺼짐(에이전트 간 호출 없음)'),
+      el('span', {}, el('b', {}, p.name), ' ', el('code', { class: 'faint' }, p.id), isDefault ? el('div', { class: 'faint small' }, t('admin.default_recipient')) : null),
+      cb(t('admin.cb_member', { name: p.name }), !!m, false, (i) => changeMember(p, i.checked ? { can_read: true, can_post: true } : { remove: true }), { 'data-k': 'member' }),
+      cb(t('admin.cb_read', { name: p.name }), !!m?.can_read, !m, (i) => changeMember(p, { can_read: i.checked, can_post: i.checked ? !!m.can_post : false }), { 'data-k': 'read' }),
+      cb(t('admin.cb_post', { name: p.name }), !!m?.can_post, !m || !m.can_read, (i) => changeMember(p, { can_read: true, can_post: i.checked }), { 'data-k': 'post' }),
+      el('span', { class: 'faint small' }, t('admin.invoke_off')),
     ];
     return narrow
       ? el(
           'li',
           { class: `rcard mb-row${m ? '' : ' dim'}`, 'data-pid': p.id },
           el('div', { class: 'rc1' }, cells[0]),
-          el('div', { class: 'mb-toggles' }, el('label', {}, cells[1], ' 멤버'), el('label', {}, cells[2], ' 읽기'), el('label', {}, cells[3], ' 게시')),
-          el('div', { class: 'faint small' }, '호출: 꺼짐(에이전트 간 호출 없음)'),
+          el('div', { class: 'mb-toggles' }, el('label', {}, cells[1], ` ${t('admin.member')}`), el('label', {}, cells[2], ` ${t('admin.read')}`), el('label', {}, cells[3], ` ${t('admin.post')}`)),
+          el('div', { class: 'faint small' }, t('admin.invoke_off_narrow')),
         )
       : el('tr', { class: `mb-row${m ? '' : ' dim'}`, 'data-pid': p.id }, ...cells.map((c) => el('td', {}, c)));
   };
   const masterCells = [
-    el('span', {}, el('b', {}, master?.name ?? '마스터'), ' ', el('span', { class: 'faint small' }, '마스터 — 항상 멤버')),
-    cb('마스터 멤버', true, true),
-    cb('마스터 읽기', true, true),
-    cb('마스터 게시', true, true),
-    el('span', { class: 'small' }, '호출 가능'),
+    el('span', {}, el('b', {}, master?.name ?? t('admin.master')), ' ', el('span', { class: 'faint small' }, t('admin.master_always'))),
+    cb(t('admin.cb_member', { name: t('admin.master') }), true, true),
+    cb(t('admin.cb_read', { name: t('admin.master') }), true, true),
+    cb(t('admin.cb_post', { name: t('admin.master') }), true, true),
+    el('span', { class: 'small' }, t('admin.invoke_on')),
   ];
-  const head = el('div', { class: 'mb-head small' }, convLabel(t.kind, pathOf(threadById(t.id) ?? t)), ' · ', el('a', { href: `#${t.id}` }, '대화 열기'), ' · ', el('a', { href: `#audit?thread=${encodeURIComponent(t.id)}&action=member.*&since=` }, '이 대화의 권한 변경 기록'));
+  const head = el('div', { class: 'mb-head small' }, convLabel(thr.kind, pathOf(threadById(thr.id) ?? thr)), ' · ', el('a', { href: `#${thr.id}` }, t('admin.open_thread')), ' · ', el('a', { href: `#audit?thread=${encodeURIComponent(thr.id)}&action=member.*&since=` }, t('admin.member_history')));
   if (narrow) {
     $('mb-table').replaceChildren(
       head,
-      el('ul', { class: 'rcards' }, el('li', { class: 'rcard mb-row master' }, el('div', { class: 'rc1' }, masterCells[0]), el('div', { class: 'faint small' }, '읽기·게시·호출 모두 가능')), ...agents.map(rowFor)),
+      el('ul', { class: 'rcards' }, el('li', { class: 'rcard mb-row master' }, el('div', { class: 'rc1' }, masterCells[0]), el('div', { class: 'faint small' }, t('admin.master_all'))), ...agents.map(rowFor)),
     );
   } else {
     $('mb-table').replaceChildren(
@@ -645,7 +646,7 @@ function renderMembers() {
       el(
         'table',
         { class: 'rtable mbtable' },
-        el('thead', {}, el('tr', {}, ...['참여자', '멤버', '읽기', '게시', '호출'].map((h) => el('th', { scope: 'col' }, h)))),
+        el('thead', {}, el('tr', {}, ...[t('admin.participant'), t('admin.member'), t('admin.read'), t('admin.post'), t('admin.invoke')].map((h) => el('th', { scope: 'col' }, h)))),
         el('tbody', {}, el('tr', { class: 'mb-row master' }, ...masterCells.map((c) => el('td', {}, c))), ...agents.map(rowFor)),
       ),
     );
@@ -653,12 +654,12 @@ function renderMembers() {
 }
 async function changeMember(p, body) {
   const th = S.mbThread;
-  const t = threadById(th);
+  const thr = threadById(th);
   if (body.remove) {
     const ok = await ask({
-      title: '멤버에서 빼기',
-      text: `${p.name}을(를) «${t?.title ?? th}»에서 뺍니다. 이 대화를 더 이상 읽거나 쓰지 못하고, 이 에이전트 앞으로 남은 전달은 거둬집니다. 다시 넣으면 권한이 돌아옵니다. 지난 기록은 그대로입니다.`,
-      ok: '빼기',
+      title: t('admin.remove_title'),
+      text: t('admin.remove_text', { name: p.name, title: thr?.title ?? th }),
+      ok: t('admin.remove'),
       danger: true,
     });
     if (!ok) return renderMembers();
@@ -669,11 +670,11 @@ async function changeMember(p, body) {
     const d = await api('POST', `/api/threads/${encodeURIComponent(th)}/members`, { participant_id: p.id, ...body });
     if (th === S.mbThread) S.mbDetail = d;
     const m = d.members.find((x) => x.participant_id === p.id);
-    const now = m ? `읽기 ${m.can_read ? '켬' : '끔'} · 게시 ${m.can_post ? '켬' : '끔'}` : '멤버 아님';
-    $('mb-status').replaceChildren(`${p.name} → ${now}. 감사 기록에 남았습니다 `, el('a', { href: `#audit?thread=${encodeURIComponent(th)}&action=member.*&since=` }, '(기록 보기)'));
-    announce(`${p.name} 권한 변경: ${now}`);
+    const now = m ? t('admin.perm_now', { read: m.can_read ? t('admin.on') : t('admin.off'), post: m.can_post ? t('admin.on') : t('admin.off') }) : t('admin.not_member');
+    $('mb-status').replaceChildren(`${t('admin.perm_saved', { name: p.name, now })} `, el('a', { href: `#audit?thread=${encodeURIComponent(th)}&action=member.*&since=` }, t('admin.view_log_paren')));
+    announce(t('admin.perm_changed', { name: p.name, now }));
   } catch (e) {
-    $('mb-status').textContent = `바꾸지 못했습니다: ${e.message}`;
+    $('mb-status').textContent = t('admin.change_failed', { error: e.message });
   }
   S.mbBusy = false;
   renderMembers();

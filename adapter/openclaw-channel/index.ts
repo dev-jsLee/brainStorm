@@ -47,7 +47,7 @@ function resolveAccount(cfg: OpenClawConfig, accountId?: string | null): Account
     url: typeof s.url === 'string' && s.url ? s.url.replace(/\/$/, '') : null,
     tokenFile: typeof s.tokenFile === 'string' && s.tokenFile ? s.tokenFile : null,
     agentId: typeof s.agentId === 'string' && s.agentId ? s.agentId : 'main',
-    worker: typeof s.worker === 'string' && s.worker ? s.worker : 'openclaw-ct109',
+    worker: typeof s.worker === 'string' && s.worker ? s.worker : 'openclaw',
     pollMs: typeof s.pollMs === 'number' && s.pollMs >= 500 ? s.pollMs : 3000,
     turnTimeoutMs: typeof s.turnTimeoutMs === 'number' && s.turnTimeoutMs > 0 ? s.turnTimeoutMs : null,
   };

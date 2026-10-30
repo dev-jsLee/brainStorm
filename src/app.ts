@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { WebSocketServer, type WebSocket } from 'ws';
 import type { Config } from './config.js';
 import { openDb, type DB } from './db.js';
+import { clientBundle, has, languages, normLang, t } from './i18n.js';
 import { ANON_ACTOR, ApiError, Store, type NoticeEvent, type Principal } from './store.js';
 
 const COOKIE = 'bs_session';
@@ -26,11 +27,13 @@ const STATIC: Record<string, string> = {
   '/': 'index.html',
   '/index.html': 'index.html',
   '/app.js': 'app.js',
+  '/i18n.js': 'i18n.js',
   '/runs.js': 'runs.js',
   '/admin.js': 'admin.js',
   '/claims.js': 'claims.js',
   '/face.js': 'face.js',
   '/style.css': 'style.css',
+  '/fonts.css': 'fonts.css',
   '/manifest.webmanifest': 'manifest.webmanifest',
   '/sw.js': 'sw.js',
   '/icon.svg': 'icon.svg',
@@ -41,6 +44,7 @@ const MIME: Record<string, string> = {
   '.css': 'text/css; charset=utf-8',
   '.webmanifest': 'application/manifest+json',
   '.svg': 'image/svg+xml',
+  '.woff2': 'font/woff2',
 };
 
 export interface App {
@@ -94,8 +98,16 @@ export async function buildApp(cfg: Config, opts: { logger?: boolean } = {}): Pr
     return payload;
   });
 
-  fastify.setErrorHandler((err: any, _req, reply) => {
-    if (err instanceof ApiError) return reply.code(err.status).send({ error: err.code, message: err.message, ...err.extra });
+  // 오류 안내는 요청 언어로(마스터 #823): 화면은 X-BS-Lang 머리로 자기 언어를 알린다 · 없으면 서버 언어
+  const reqLang = (req: FastifyRequest) => normLang(req.headers['x-bs-lang']) ?? store.lang();
+  fastify.setErrorHandler((err: any, req, reply) => {
+    if (err instanceof ApiError) {
+      const lang = reqLang(req);
+      // 키를 준 오류는 그 키로 · 문구 없이 코드만 준 오류는 `err.<code>` 가 사전에 있으면 그것으로 · 나머지는 원문 그대로
+      const key = err.i18n?.key ?? (err.message === err.code ? `err.${err.code}` : null);
+      const message = key && has(lang, key) ? t(lang, key, { ...err.extra, ...err.i18n?.vars }) : err.message;
+      return reply.code(err.status).send({ error: err.code, message, ...err.extra });
+    }
     if (err.statusCode === 413 || err.code === 'FST_ERR_CTP_BODY_TOO_LARGE') return reply.code(413).send({ error: 'too_large' });
     if (err.statusCode && err.statusCode < 500) return reply.code(err.statusCode).send({ error: 'bad_request', message: err.message });
     fastify.log.error({ err: { message: err.message, stack: err.stack } }, 'internal error');
@@ -147,6 +159,29 @@ export async function buildApp(cfg: Config, opts: { logger?: boolean } = {}): Pr
     });
   }
 
+  // 글꼴(디자인 #782): public/fonts/<폴더>/<이름>.woff2 — 시작할 때 있는 파일만 길로 연다(목록 밖은 404). 이름이 내용 해시라 오래 캐시
+  const FONTS_DIR = path.join(PUBLIC_DIR, 'fonts');
+  const fontFiles = new Set<string>();
+  if (fs.existsSync(FONTS_DIR))
+    for (const d of fs.readdirSync(FONTS_DIR, { withFileTypes: true }))
+      if (d.isDirectory() && /^[a-z]+$/.test(d.name))
+        for (const f of fs.readdirSync(path.join(FONTS_DIR, d.name))) if (/^[A-Za-z0-9_-]+(\.[0-9]+)?\.woff2$/.test(f)) fontFiles.add(`${d.name}/${f}`);
+  fastify.get<{ Params: { dir: string; file: string } }>('/fonts/:dir/:file', async (req, reply) => {
+    const key = `${req.params.dir}/${req.params.file}`;
+    if (!fontFiles.has(key)) throw new ApiError(404, 'not_found');
+    reply.header('Content-Type', 'font/woff2');
+    reply.header('Cache-Control', 'max-age=31536000, immutable');
+    return reply.send(fs.readFileSync(path.join(FONTS_DIR, key)));
+  });
+
+  // 사전 묶음(마스터 #823): 모든 언어를 한 파일로 — 화면이 언어를 동기로 고른다(i18n.js 가 먼저 읽는다)
+  const i18nBundle = clientBundle();
+  fastify.get('/i18n-dict.js', async (_req, reply) => {
+    reply.header('Content-Type', 'text/javascript; charset=utf-8');
+    reply.header('Cache-Control', 'no-cache');
+    return reply.send(i18nBundle);
+  });
+
   fastify.get('/healthz', async () => {
     db.prepare('SELECT 1').get();
     return { ok: true, schema: db.pragma('user_version', { simple: true }), server_seq: store.serverSeq() };
@@ -196,7 +231,15 @@ export async function buildApp(cfg: Config, opts: { logger?: boolean } = {}): Pr
     return { ok: true };
   });
 
-  fastify.get('/api/me', { preHandler: auth }, async (req) => ({ participant: req.principal!.participant, via: req.principal!.via, on_call_only: cfg.onCallOnly }));
+  fastify.get('/api/me', { preHandler: auth }, async (req) => ({
+    participant: req.principal!.participant,
+    via: req.principal!.via,
+    on_call_only: cfg.onCallOnly,
+    lang: store.lang(),
+    langs: languages(),
+  }));
+  // 언어(마스터만 · #823): 화면 언어를 고르면 서버 언어도 같이 — 에이전트 규약·서버 안내가 따른다
+  fastify.put<{ Body: { lang?: unknown } }>('/api/settings/lang', { preHandler: auth }, async (req) => store.setLang(req.principal!, req.body?.lang));
   fastify.get('/api/participants', { preHandler: auth }, async () => ({ participants: store.listParticipants(true) }));
   // 에이전트 연결 상태(마스터만) — 이름·마지막 접속·토큰 개수만. 토큰 값·해시는 내지 않는다
   fastify.get('/api/agents', { preHandler: auth }, async (req) => ({ agents: store.listAgents(req.principal!) }));

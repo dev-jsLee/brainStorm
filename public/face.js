@@ -4,8 +4,8 @@
 // app.js 보다 먼저 읽히지만 함수만 정의한다. app.js 의 전역($·S·el·api·pname·fillBody…)을 쓴다.
 'use strict';
 
-const FACE_STATE = { running: '진행 중', question: '질문 — 마스터 답 대기', agreed: '합의', limit: '상한', stopped: '멈춤', approved: '승인됨', rejected: '반려됨' };
-const FACE_STOP = { no_doc: '합의문 없음 — 그 턴의 답에 ```합의문 블록이 없었습니다', run_failed: '실행 실패', master_stop: '마스터가 멈춤', mode_off: '대면 모드를 껐음', invoke_paused: '새 호출 금지 중' };
+const FACE_STATE = { running: t('face.st_running'), question: t('face.st_question'), agreed: t('face.st_agreed'), limit: t('face.st_limit'), stopped: t('face.st_stopped'), approved: t('face.st_approved'), rejected: t('face.st_rejected') };
+const FACE_STOP = { no_doc: t('face.stop_no_doc', { word: t('proto.agreement') }), run_failed: t('face.stop_run_failed'), master_stop: t('face.stop_master'), mode_off: t('face.stop_mode_off'), invoke_paused: t('face.stop_paused') };
 
 const faceActive = () => S.detail?.thread?.mode === 'face' && S.detail.thread.kind !== 'room';
 
@@ -13,25 +13,25 @@ const faceActive = () => S.detail?.thread?.mode === 'face' && S.detail.thread.ki
 function syncFaceToggle() {
   const b = $('t-face');
   if (!b) return;
-  const t = S.detail?.thread;
-  b.hidden = !t || t.kind === 'room' || !S.me?.is_master;
+  const th = S.detail?.thread;
+  b.hidden = !th || th.kind === 'room' || !S.me?.is_master;
   const on = faceActive();
-  b.textContent = on ? '대면 모드 끄기' : '대면 모드';
+  b.textContent = on ? t('face.toggle_off') : t('face.mode');
   b.setAttribute('aria-pressed', on ? 'true' : 'false');
-  b.title = on ? '보통 대화로 돌아갑니다 — 진행 중인 대면은 멈춥니다' : '가운데 합의문 하나를 두 에이전트가 번갈아 고칩니다(늘 초안 쪽부터)';
+  b.title = on ? t('face.toggle_off_title') : t('face.toggle_on_title');
 }
 
 async function toggleFace() {
   if (!S.cur || !S.detail) return;
   const on = faceActive();
   if (on && S.face?.round && (S.face.round.state === 'running' || S.face.round.state === 'question')) {
-    if (!(await ask({ title: '대면 모드 끄기', text: '진행 중인 대면이 멈춥니다(지금 차례의 배달을 거두고 도는 실행에 중단을 요청). 보통 대화로 돌아갑니다.', ok: '끄기' }))) return;
+    if (!(await ask({ title: t('face.toggle_off'), text: t('face.off_confirm'), ok: t('face.off') }))) return;
   }
   try {
     await api('POST', `/api/threads/${S.cur}/mode`, { mode: on ? 'chat' : 'face' });
-    announce(on ? '대면 모드 끔' : '대면 모드 켬');
+    announce(on ? t('face.mode_off_done') : t('face.mode_on_done'));
   } catch (e) {
-    notify('대면 모드', e.code === 'face_members' ? '두 에이전트가 이 대화의 멤버여야 합니다. ' + (e.message ?? '') : e.message);
+    notify(t('face.mode'), e.code === 'face_members' ? t('face.need_members') + (e.message ?? '') : e.message);
   }
   await loadDetail().catch(() => {});
 }
@@ -63,14 +63,14 @@ function faceRecipientsNote() {
   const r = f?.round;
   const drafter = f?.config?.drafter;
   let text;
-  if (r?.state === 'question') text = `질문 답 → ${pname(r.question_by)}이(가) 이어 받습니다`;
-  else if (r?.state === 'running') text = `대면 진행 중(${pname(r.next_agent)} 차례) — 이 글은 맥락으로만 남습니다`;
-  else text = `새 지시 → ${drafter ? pname(drafter) : '초안 쪽'}부터 시작합니다`;
-  return [el('span', { class: 'lbl' }, '대면'), el('span', { class: 'small', id: 'face-to' }, text)];
+  if (r?.state === 'question') text = t('face.to_question', { agent: pname(r.question_by) });
+  else if (r?.state === 'running') text = t('face.to_running', { agent: pname(r.next_agent) });
+  else text = t('face.to_new', { agent: drafter ? pname(drafter) : t('face.drafter_side') });
+  return [el('span', { class: 'lbl' }, t('face.face')), el('span', { class: 'small', id: 'face-to' }, text)];
 }
 
 function faceTurnLabel(r) {
-  return r.turn > r.base_turns ? `턴 ${r.turn}/${r.max_turns}` : `턴 ${r.turn}/${r.base_turns}(→${r.max_turns})`;
+  return r.turn > r.base_turns ? t('face.turn_over', { turn: r.turn, max: r.max_turns }) : t('face.turn_base', { turn: r.turn, base: r.base_turns, max: r.max_turns });
 }
 
 function faceMsgCard(m, f) {
@@ -81,7 +81,7 @@ function faceMsgCard(m, f) {
   return el(
     'article',
     { class: 'face-msg', id: `fm${m.seq}`, 'data-seq': String(m.seq) },
-    el('div', { class: 'face-msg-head small' }, el('b', {}, pname(m.author_id)), ` #${m.seq} · ${fmtHm(m.created_at)}`, rev ? el('span', { class: 'pill' }, `판 ${rev.rev} · 턴 ${rev.turn}`) : null, q ? el('span', { class: 'pill warn' }, '질문') : null),
+    el('div', { class: 'face-msg-head small' }, el('b', {}, pname(m.author_id)), ` #${m.seq} · ${fmtHm(m.created_at)}`, rev ? el('span', { class: 'pill' }, t('face.rev_turn', { rev: rev.rev, turn: rev.turn })) : null, q ? el('span', { class: 'pill warn' }, t('face.question')) : null),
     body,
   );
 }
@@ -97,8 +97,8 @@ function renderFace() {
   // 이 라운드의 글만(라운드가 없으면 전부) — 지시 글부터
   const from = r ? r.instruction_seq : 0;
   const msgs = S.messages.filter((m) => m.seq >= from);
-  $('face-left-h').textContent = drafter ? pname(drafter) : '초안 쪽';
-  $('face-right-h').textContent = reviewer ? pname(reviewer) : '검토 쪽';
+  $('face-left-h').textContent = drafter ? pname(drafter) : t('face.drafter_side');
+  $('face-right-h').textContent = reviewer ? pname(reviewer) : t('face.reviewer_side');
   $('face-tab-left').textContent = $('face-left-h').textContent;
   $('face-tab-right').textContent = $('face-right-h').textContent;
   for (const b of $('face-tabs').querySelectorAll('button')) b.setAttribute('aria-selected', b.dataset.tab === box.dataset.tab ? 'true' : 'false');
@@ -118,19 +118,19 @@ function renderFaceDoc(f) {
   const head = $('face-doc-h');
   const doc = $('face-doc');
   if (!r) {
-    head.textContent = '합의문';
-    doc.replaceChildren(el('p', { class: 'muted small' }, '아직 라운드가 없습니다 — 아래 작성란에 지시를 쓰면 초안 쪽부터 시작합니다.'));
+    head.textContent = t('face.agreement');
+    doc.replaceChildren(el('p', { class: 'muted small' }, t('face.no_round')));
     return;
   }
   head.replaceChildren(
-    el('b', {}, r.rev ? `합의문 · 판 ${r.rev}` : '합의문'),
+    el('b', {}, r.rev ? t('face.agreement_rev', { rev: r.rev }) : t('face.agreement')),
     ' ',
     el('span', { class: 'pill' }, faceTurnLabel(r)),
     ' ',
     el('span', { class: `pill face-st-${r.state}` }, FACE_STATE[r.state] ?? r.state),
   );
   if (!r.rev) {
-    doc.replaceChildren(el('p', { class: 'muted small' }, `${pname(r.next_agent ?? r.drafter)}이(가) 초안을 쓰는 중입니다.`));
+    doc.replaceChildren(el('p', { class: 'muted small' }, t('face.drafting', { agent: pname(r.next_agent ?? r.drafter) })));
     return;
   }
   const last = f.revs.find((x) => x.rev === r.rev);
@@ -147,9 +147,9 @@ function renderFaceDoc(f) {
         const changed = r.rev > 1 && o.rev === r.rev;
         return el(
           'li',
-          { class: `${changed ? 'changed' : ''}${iss ? ' issue' : ''}`, title: `${pname(o.by)} · 판 ${o.rev}${o.draft ? ' (초안)' : ''}` },
+          { class: `${changed ? 'changed' : ''}${iss ? ' issue' : ''}`, title: t('face.line_origin', { by: pname(o.by), rev: o.rev }) + (o.draft ? t('face.draft_sfx') : '') },
           el('span', { class: 'ln-text' }, l || ' '),
-          iss ? el('span', { class: 'flag', title: `안건 ${iss.n} — 마스터가 정합니다` }, `⚑ 안건 ${iss.n}`) : null,
+          iss ? el('span', { class: 'flag', title: t('face.issue_flag_title', { n: iss.n }) }, t('face.issue_flag', { n: iss.n })) : null,
         );
       }),
     ),
@@ -159,11 +159,11 @@ function renderFaceDoc(f) {
 function faceIssueCard(f, iss) {
   const r = f.round;
   const closed = r.state === 'approved' || r.state === 'rejected';
-  const ta = el('textarea', { rows: '2', class: 'face-own', 'aria-label': `안건 ${iss.n} 직접 쓰기`, placeholder: '직접 쓰기 — 이 줄(들)을 이 글로 갈아 끼웁니다' });
+  const ta = el('textarea', { rows: '2', class: 'face-own', 'aria-label': t('face.own_aria', { n: iss.n }), placeholder: t('face.own_ph') });
   return el(
     'section',
     { class: `face-card face-issue ${iss.state}`, id: `fi-${iss.id}` },
-    el('h4', {}, `⚑ 안건 ${iss.n}`, ' ', el('span', { class: 'muted small' }, iss.kind === 'limit' ? '상한 턴에 바뀐 줄' : '쟁점 — 상대가 고친 줄을 다시 고침'), iss.state === 'decided' ? el('span', { class: 'pill' }, '정함') : null),
+    el('h4', {}, t('face.issue_flag', { n: iss.n }), ' ', el('span', { class: 'muted small' }, iss.kind === 'limit' ? t('face.issue_limit') : t('face.issue_contested')), iss.state === 'decided' ? el('span', { class: 'pill' }, t('face.decided')) : null),
     el(
       'ol',
       { class: 'face-versions' },
@@ -171,16 +171,16 @@ function faceIssueCard(f, iss) {
         el(
           'li',
           {},
-          el('div', { class: 'small' }, el('b', {}, `${pname(v.by)}안`), ` · 판 ${v.rev}`, v.revert ? el('span', { class: 'pill warn', title: '자기 옛 문장으로 되돌림 — 가장 센 이견' }, '되돌림') : null, v.seq ? el('a', { href: '#', class: 'small', onclick: (e) => (e.preventDefault(), document.getElementById(`fm${v.seq}`)?.scrollIntoView({ block: 'center' })) }, ` 해설 #${v.seq}`) : null),
-          el('pre', { class: 'face-v' }, v.text || '(지움)'),
-          iss.state === 'open' && !closed && S.me?.is_master ? el('button', { type: 'button', class: 'small', 'data-pick': String(k), onclick: () => faceDecide(iss, { pick: k }) }, '이 판으로') : null,
+          el('div', { class: 'small' }, el('b', {}, t('face.version_by', { name: pname(v.by) })), t('face.rev_sep', { rev: v.rev }), v.revert ? el('span', { class: 'pill warn', title: t('face.revert_title') }, t('face.revert')) : null, v.seq ? el('a', { href: '#', class: 'small', onclick: (e) => (e.preventDefault(), document.getElementById(`fm${v.seq}`)?.scrollIntoView({ block: 'center' })) }, t('face.note_link', { seq: v.seq })) : null),
+          el('pre', { class: 'face-v' }, v.text || t('face.erased')),
+          iss.state === 'open' && !closed && S.me?.is_master ? el('button', { type: 'button', class: 'small', 'data-pick': String(k), onclick: () => faceDecide(iss, { pick: k }) }, t('face.pick')) : null,
         ),
       ),
     ),
     iss.state === 'open' && !closed && S.me?.is_master
-      ? el('div', { class: 'face-own-row' }, ta, el('button', { type: 'button', class: 'small', onclick: () => ta.value.trim() && faceDecide(iss, { text: ta.value }) }, '이 글로 정함'))
+      ? el('div', { class: 'face-own-row' }, ta, el('button', { type: 'button', class: 'small', onclick: () => ta.value.trim() && faceDecide(iss, { text: ta.value }) }, t('face.decide_text')))
       : iss.state === 'decided'
-        ? el('pre', { class: 'face-v decided' }, iss.decision || '(지움)')
+        ? el('pre', { class: 'face-v decided' }, iss.decision || t('face.erased'))
         : null,
   );
 }
@@ -196,28 +196,28 @@ function renderFaceCards(f) {
       el(
         'section',
         { class: 'face-card face-question' },
-        el('h4', {}, `질문 — ${pname(r.question_by)}`),
+        el('h4', {}, t('face.question_by', { agent: pname(r.question_by) })),
         el('p', {}, r.question),
-        el('button', { type: 'button', class: 'small', onclick: () => $('body').focus() }, '작성란에서 답하기'),
+        el('button', { type: 'button', class: 'small', onclick: () => $('body').focus() }, t('face.answer_in_composer')),
       ),
     );
   const open = f.issues.filter((i) => i.state === 'open');
   for (const iss of f.issues) cards.push(faceIssueCard(f, iss));
   if (r.state === 'agreed' || r.state === 'limit') {
-    const settle = el('input', { type: 'text', id: 'face-settle', placeholder: '정산: 날짜 · 잴 것', 'aria-label': '정산 줄' });
+    const settle = el('input', { type: 'text', id: 'face-settle', placeholder: t('face.settle_ph'), 'aria-label': t('face.settle_aria') });
     cards.push(
       el(
         'section',
         { class: 'face-card face-verdict' },
-        el('h4', {}, r.state === 'agreed' ? (open.length ? `합의 · 안건 ${open.length}` : '합의') : `상한 — 턴 ${r.turn}까지 바뀜`),
-        el('p', { class: 'small' }, open.length ? `열린 안건 ${open.length}개를 다 정하면 승인할 수 있습니다.` : '마지막 판이 둘의 합의입니다.'),
+        el('h4', {}, r.state === 'agreed' ? (open.length ? t('face.agreed_issues', { n: open.length }) : t('face.st_agreed')) : t('face.limit_head', { turn: r.turn })),
+        el('p', { class: 'small' }, open.length ? t('face.open_issues', { n: open.length }) : t('face.final_agreed')),
         master ? settle : null,
         master
           ? el(
               'div',
               { class: 'row' },
-              el('button', { type: 'button', class: 'primary', id: 'face-approve', disabled: open.length > 0, onclick: () => faceVerdict('approve', settle.value) }, '승인'),
-              el('button', { type: 'button', id: 'face-reject', onclick: () => faceVerdict('reject', settle.value) }, '반려'),
+              el('button', { type: 'button', class: 'primary', id: 'face-approve', disabled: open.length > 0, onclick: () => faceVerdict('approve', settle.value) }, t('face.approve')),
+              el('button', { type: 'button', id: 'face-reject', onclick: () => faceVerdict('reject', settle.value) }, t('face.reject')),
             )
           : null,
       ),
@@ -229,9 +229,9 @@ function renderFaceCards(f) {
       el(
         'section',
         { class: 'face-card face-stopped' },
-        el('h4', {}, '멈춤'),
-        el('p', { class: 'small' }, r.state === 'stopped' ? FACE_STOP[r.stop_reason] ?? r.stop_reason ?? '' : '그 턴의 실행이 답 없이 끝났습니다(취소·미확인).'),
-        master ? el('button', { type: 'button', id: 'face-retry', onclick: faceRetry }, `다시 돌리기 — ${pname(r.next_agent ?? r.drafter)} 턴 ${r.turn + 1}`) : null,
+        el('h4', {}, t('face.st_stopped')),
+        el('p', { class: 'small' }, r.state === 'stopped' ? FACE_STOP[r.stop_reason] ?? r.stop_reason ?? '' : t('face.stalled')),
+        master ? el('button', { type: 'button', id: 'face-retry', onclick: faceRetry }, t('face.retry', { agent: pname(r.next_agent ?? r.drafter), turn: r.turn + 1 })) : null,
       ),
     );
   } else if (r.state === 'running') {
@@ -239,8 +239,8 @@ function renderFaceCards(f) {
       el(
         'section',
         { class: 'face-card face-running small' },
-        el('span', {}, `${pname(r.next_agent)} 차례 · 턴 ${r.turn + 1}`),
-        master ? el('button', { type: 'button', class: 'small', id: 'face-stop', onclick: faceStop }, '멈추기') : null,
+        el('span', {}, t('face.turn_of', { agent: pname(r.next_agent), turn: r.turn + 1 })),
+        master ? el('button', { type: 'button', class: 'small', id: 'face-stop', onclick: faceStop }, t('face.stop')) : null,
       ),
     );
   }
@@ -252,16 +252,16 @@ async function faceAct(path, body, done) {
     await api('POST', path, body);
     if (done) announce(done);
   } catch (e) {
-    notify('대면', e.message);
+    notify(t('face.face'), e.message);
   }
   await loadFace().catch(() => {});
 }
-const faceDecide = (iss, body) => faceAct(`/api/face/${S.face.round.id}/issues/${iss.id}/decide`, body, `안건 ${iss.n} 정함`);
-const faceVerdict = (verdict, note) => faceAct(`/api/face/${S.face.round.id}/verdict`, { verdict, note: note || undefined }, verdict === 'approve' ? '승인함' : '반려함');
-const faceRetry = () => faceAct(`/api/face/${S.face.round.id}/retry`, {}, '다시 돌림');
+const faceDecide = (iss, body) => faceAct(`/api/face/${S.face.round.id}/issues/${iss.id}/decide`, body, t('face.issue_decided', { n: iss.n }));
+const faceVerdict = (verdict, note) => faceAct(`/api/face/${S.face.round.id}/verdict`, { verdict, note: note || undefined }, verdict === 'approve' ? t('face.approved_done') : t('face.rejected_done'));
+const faceRetry = () => faceAct(`/api/face/${S.face.round.id}/retry`, {}, t('face.retried'));
 async function faceStop() {
-  if (!(await ask({ title: '대면 멈추기', text: '지금 차례의 배달을 거두고 도는 실행에 중단을 요청합니다. «다시 돌리기»로 같은 턴부터 이어 갈 수 있습니다.', ok: '멈추기' }))) return;
-  await faceAct(`/api/face/${S.face.round.id}/stop`, {}, '대면 멈춤');
+  if (!(await ask({ title: t('face.stop_title'), text: t('face.stop_confirm'), ok: t('face.stop') }))) return;
+  await faceAct(`/api/face/${S.face.round.id}/stop`, {}, t('face.stopped_done'));
 }
 
 function setFaceTab(tab) {

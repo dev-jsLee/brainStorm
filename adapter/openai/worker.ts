@@ -13,9 +13,12 @@ import type { ClaimCarry, ClaimForward, ClaimHoldNotice, ClaimPulled, ClaimSessi
 import { renderFace, renderHoldNotices, type ClaimFace } from '../../src/protocol.js';
 import { stripAnswerStamp } from '../openclaw-channel/src/mapping.js';
 import { httpFetch } from './http.js';
+import { t } from '../../src/i18n.js';
 import { BrainstormClient, HttpError } from '../openclaw-channel/src/worker.js';
 import {
   buildChatMessages,
+  DEFAULT_SYSTEM_PROMPT,
+  defaultSystemPrompt,
   redactSecrets,
   selectGenerationContext,
   SseLines,
@@ -72,6 +75,8 @@ interface Claim {
   /** 네 요청이 보류됐다는 알림(그 스레드에서 처음 불리는 실행 한 번만) — 옛 서버는 안 보낸다 */
   hold_notices?: ClaimHoldNotice[] | null;
   face?: ClaimFace | null;
+  /** 규약·안내 언어(마스터 #823) — 옛 서버는 안 보낸다(ko) */
+  lang?: string;
 }
 
 export interface ChatResult {
@@ -193,7 +198,7 @@ export class OpenAIWorker {
   }
 
   /** chat completions 한 번. 스트리밍이면 조각을 모아 끝난 뒤 돌려준다 */
-  async chat(messages: ChatMessage[], signal: AbortSignal, onProgress?: (note: string) => void): Promise<ChatResult> {
+  async chat(messages: ChatMessage[], signal: AbortSignal, onProgress?: (note: string) => void, lang?: string): Promise<ChatResult> {
     const started = Date.now();
     const body: Record<string, unknown> = {
       model: this.o.model,
@@ -258,12 +263,12 @@ export class OpenAIWorker {
       if (typeof d?.content === 'string' && d.content) {
         if (out.firstTokenMs === null) out.firstTokenMs = Date.now() - started;
         out.text += d.content;
-        onProgress?.('답 쓰는 중');
+        onProgress?.(t(lang, 'progress.writing'));
       }
       const r = d?.reasoning_content ?? d?.reasoning;
       if (typeof r === 'string') {
         out.reasoningChars += r.length;
-        if (!out.text) onProgress?.('생각하는 중(추론)');
+        if (!out.text) onProgress?.(t(lang, 'progress.reasoning'));
       }
       if (ch?.finish_reason) out.finishReason = ch.finish_reason;
     };
@@ -330,7 +335,7 @@ export class OpenAIWorker {
       ac.abort(new Error('timeout'));
     }, this.o.timeoutMs);
     // 읽음: 시작 즉시 기계적 반응을 한 번 · 그 뒤 경과(모델 대기 → 생각 → 답 쓰는 중)는 바뀔 때만 싣는다
-    let progress = '읽었음 — 모델에 요청 보냄';
+    let progress = t(claim.lang, 'progress.read_sent');
     let sent = '';
     const beat = () => {
       const note = progress !== sent ? progress : undefined;
@@ -365,7 +370,14 @@ export class OpenAIWorker {
       const attachments = await this.loadAttachments(ctxMsgs, ac.signal);
       const built = buildChatMessages({
         attachments,
-        system: [systemFor(this.o.systemPrompt, claim.thread.title), renderHoldNotices(claim.hold_notices), claim.face ? renderFace(claim.face) : ''].filter(Boolean).join('\n'),
+        system: [
+          // 설정 파일 없이 기본 프롬프트를 쓰면 턴의 언어로 다시 고른다(마스터 #823)
+          systemFor(this.o.systemPrompt === DEFAULT_SYSTEM_PROMPT ? defaultSystemPrompt(claim.lang) : this.o.systemPrompt, claim.thread.title, claim.lang),
+          renderHoldNotices(claim.hold_notices, claim.lang),
+          claim.face ? renderFace(claim.face, claim.lang) : '',
+        ]
+          .filter(Boolean)
+          .join('\n'),
         messages: ctxMsgs,
         triggerSeq: claim.trigger.seq,
         selfId: me.id,
@@ -375,11 +387,12 @@ export class OpenAIWorker {
         forwarded: !!claim.forward,
         pulled: claim.pulled ?? null,
         carry: claim.carry ?? null,
+        lang: claim.lang ?? null,
       });
       const started = Date.now();
       let r: ChatResult;
       try {
-        r = await this.chat(built.messages, ac.signal, (n) => (progress = n));
+        r = await this.chat(built.messages, ac.signal, (n) => (progress = n), claim.lang);
       } catch (e) {
         if (cancelled || lost) {
           this.o.log.info(`턴 멈춤 run=${runId} (${cancelled ? '취소' : '소유 잃음'}) — 답을 올리지 않는다`);
@@ -404,7 +417,7 @@ export class OpenAIWorker {
         await fail(`openai: empty reply (finish_reason=${r.finishReason ?? '?'})`);
         return 'failed';
       }
-      if (r.finishReason === 'length') body += '\n\n[응답이 max_tokens 에 닿아 잘렸음]';
+      if (r.finishReason === 'length') body += `\n\n${t(claim.lang, 'prompt.oa.max_tokens_cut')}`;
       const usage = compactUsage({
         openai: {
           model_requested: this.o.model,

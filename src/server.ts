@@ -1,7 +1,8 @@
 import { buildApp } from './app.js';
-import { loadConfig } from './config.js';
+import { assertListenAllowed, loadConfig } from './config.js';
 
 const cfg = loadConfig();
+assertListenAllowed(cfg.listen);
 const app = await buildApp(cfg);
 const addrs = await app.listen();
 app.fastify.log.info({ addrs, dataDir: cfg.dataDir }, 'brainStorm listening');

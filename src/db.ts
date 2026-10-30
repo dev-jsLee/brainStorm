@@ -264,7 +264,7 @@ const MIGRATIONS: Migration[] = [
   ALTER TABLE threads ADD COLUMN deleted_at INTEGER;
   ALTER TABLE threads ADD COLUMN deleted_by TEXT;
   `,
-  // 7 — 수동 전달(2026-10-12 마스터 #62·#70 · vault Notes/brainStorm-수동-전달.md):
+  // 7 — 수동 전달(2026-10-12 마스터 #62·#70):
   //     에이전트 답 끝줄 «→ 이름»은 서버가 떼어 messages.handoff_to 에 적는다(전달 아님 — 버튼 표시용).
   //     전달은 마스터가 누를 때만 deliveries 한 줄(forwarded_by · context_upto_seq = 누른 시점의 스레드 머리).
   //     runs.seen_upto = 그 실행이 실제로 받은 맥락의 끝(전달 실행만 · null 이면 result_seq — 옛 판 그대로).
@@ -301,7 +301,7 @@ const MIGRATIONS: Migration[] = [
   ALTER TABLE runs ADD COLUMN progress TEXT;
   ALTER TABLE runs ADD COLUMN progress_at INTEGER;
   `,
-  // 10 — 맥락 끌어오기(2026-10-13 마스터 #162 «권장대로» · vault Notes/brainStorm-맥락-가져오기-백구안.md «수렴»):
+  // 10 — 맥락 끌어오기(2026-10-13 마스터 #162 «권장대로»):
   //     에이전트 답 끝줄 «← 스레드제목 [#a~#b]»은 서버가 떼어 messages.pull_req 에 적는다(가져오기 아님 — 버튼 표시용).
   //     마스터가 누르면 그 글에 대한 배달 하나(받는 쪽 = 청한 에이전트)에 원문 사본(pulled · JSON)을 붙인다 —
   //     스레드에 메시지를 만들지 않고 원본과 FK 로 묶지 않는다. 배달 속성이라 한 번만 실린다.

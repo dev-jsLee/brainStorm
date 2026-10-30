@@ -89,13 +89,13 @@ describe('Claude Code 어댑터: 작업자 (가짜 claude)', () => {
 const fs = require('fs'), path = require('path');
 const a = process.argv.slice(2);
 let p = ''; process.stdin.on('data', (d) => (p += d)); process.stdin.on('end', () => {
-  fs.appendFileSync(${JSON.stringify(path.join(dir, 'calls.jsonl'))}, JSON.stringify({ args: a, prompt: p, cwd: process.cwd() }) + '\\n');
+  fs.appendFileSync(${JSON.stringify(path.join(dir, 'calls.jsonl'))}, JSON.stringify({ args: a, prompt: p, cwd: process.cwd(), th: process.env.BRAINSTORM_THREAD_ID, run: process.env.BRAINSTORM_RUN_ID }) + '\\n');
   const i = a.indexOf('--session-id');
   if (i >= 0) { const d = path.join(process.env.FAKE_CFG, 'projects', process.cwd().replace(/[^a-zA-Z0-9]/g, '-')); fs.mkdirSync(d, { recursive: true }); fs.writeFileSync(path.join(d, a[i + 1] + '.jsonl'), ''); }
   if (p.includes('FAIL')) { console.log(JSON.stringify({ type: 'result', subtype: 'error_during_execution', is_error: true, result: 'boom' })); process.exit(1); }
   const go = () => console.log(${JSON.stringify(ok({ result: '__R__' }))}.replace('__R__', '받음 ' + (p.match(/▶ #\\d+/) || [''])[0] + '\\\\n\\\\n답변시각:'));
   if (p.includes('PROGRESS')) { console.log(JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Bash', input: { command: 'ls', description: '목록 보기' } }] } })); setTimeout(go, 600); }
-  else if (p.includes('SLEEP')) setTimeout(go, 20000); else go();
+  else if (p.includes('SLEEP') || fs.existsSync(${JSON.stringify(path.join(dir, 'always-sleep'))})) setTimeout(go, 20000); else go();
 });
 `,
       { mode: 0o755 },
@@ -109,7 +109,7 @@ let p = ''; process.stdin.on('data', (d) => (p += d)); process.stdin.on('end', (
   const runs = async (th: string) => (await ctx.master('GET', `/api/threads/${th}/runs`)).json.runs as any[];
   const msgs = async (th: string) => (await ctx.master('GET', `/api/threads/${th}/messages`)).json.messages as any[];
   const detail = async (th: string) => (await ctx.master('GET', `/api/threads/${th}`)).json;
-  const worker = (timeoutMs = 10_000, refs?: { dir: string }) =>
+  const worker = (timeoutMs = 10_000, refs?: { dir: string }, wrapUpMs = 0) =>
     new BrainstormWorker({
       url: ctx.base,
       token: ctx.tokens.alpha.token,
@@ -125,6 +125,7 @@ let p = ''; process.stdin.on('data', (d) => (p += d)); process.stdin.on('end', (
         appendSystemPrompt: '덧붙임',
         extraArgs: ['--permission-mode', 'bypassPermissions'],
         timeoutMs,
+        wrapUpMs,
         env: { ...process.env, FAKE_CFG: path.join(dir, 'cfg') },
         attachDir: path.join(dir, 'att'),
         refs,
@@ -242,5 +243,39 @@ let p = ''; process.stdin.on('data', (d) => (p += d)); process.stdin.on('end', (
     await post(ctx, th, 'SLEEP 시간 초과');
     assert.equal(await w.handleOne(), 'failed');
     assert.match(String((await runs(th))[0].error), /timeout 500ms/);
+  });
+
+  test('시간 초과 + 마무리 턴 → 같은 세션 --resume 으로 마무리 프롬프트 · 그 답이 올라가고 succeeded · 턴 시각·스레드 id 환경', async () => {
+    const w = worker(500, undefined, 5000);
+    const th = await newThread(ctx, 'CC 마무리', 'alpha');
+    await post(ctx, th, 'SLEEP 마무리');
+    const n0 = calls().length;
+    assert.equal(await w.handleOne(), 'succeeded');
+    const [first, wrap] = calls().slice(n0);
+    assert.match(first.prompt, /\[턴 시각\] 시작 \d\d:\d\d · 이 턴은 0분 뒤/);
+    assert.equal(first.th, th);
+    assert.match(first.run, /^run_/);
+    const uuid = first.args[first.args.indexOf('--session-id') + 1];
+    assert.equal(wrap.args[wrap.args.indexOf('--resume') + 1], uuid);
+    assert.match(wrap.prompt, /시간 제한.*끊겼다/);
+    assert.doesNotMatch(wrap.prompt, /SLEEP/);
+    const m = (await msgs(th)).at(-1);
+    assert.match(m.body, /^받음/);
+    const r = (await runs(th))[0];
+    assert.equal(r.state, 'succeeded');
+    assert.equal(r.error, null);
+  });
+
+  test('마무리 턴도 넘기면 failed · 오류에 둘 다', async () => {
+    const w = worker(400, undefined, 400);
+    const th = await newThread(ctx, 'CC 마무리 실패', 'alpha');
+    await post(ctx, th, 'SLEEP 둘 다');
+    fs.writeFileSync(path.join(dir, 'always-sleep'), '');
+    try {
+      assert.equal(await w.handleOne(), 'failed');
+    } finally {
+      fs.rmSync(path.join(dir, 'always-sleep'), { force: true });
+    }
+    assert.match(String((await runs(th))[0].error), /timeout 400ms · 마무리 턴도 실패: timeout 400ms/);
   });
 });

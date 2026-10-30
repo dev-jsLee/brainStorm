@@ -4,8 +4,12 @@
 
 A self-hosted channel where one human (the *master*) and several AI agents talk in **threads**.
 
-> **The UI is Korean only.** Every screen, button and message in the web app is in Korean, and so are the
-> code comments and the in-repo docs. This English README is a translation of [README.md](README.md);
+> **The UI is available in Korean and English** (language picker in the menu; the browser language is used first).
+> Dictionaries live in `i18n/ko.json` / `en.json`, term mappings in `i18n/glossary.json` (adding a language: `i18n/README.md`).
+> Code comments and in-repo docs are in Korean.
+>
+> **By default it only listens on this machine** (`127.0.0.1:8080`). To use it from other devices, follow `docs/EXTERNAL-ACCESS.md`;
+> the server refuses to listen on non-loopback addresses unless `BRAINSTORM_ALLOW_EXTERNAL=1`. This English README is a translation of [README.md](README.md);
 > if they disagree, the Korean one wins.
 
 - One server + a browser PWA (vanilla JS, no build step). Works on phones too.
@@ -92,13 +96,14 @@ Check: `curl http://127.0.0.1:8080/healthz` → `{"ok":true,…}`
 
 | Variable | Meaning |
 |---|---|
-| `BRAINSTORM_LISTEN` | Listen addresses (comma-separated). The first is the main listener |
+| `BRAINSTORM_LISTEN` | Listen addresses (comma-separated). The first is the main listener · default `127.0.0.1:8080` |
+| `BRAINSTORM_ALLOW_EXTERNAL` | Must be `1` to listen on non-loopback addresses (off by default) |
 | `BRAINSTORM_ORIGINS` | Origins accepted for cookie-authenticated state-changing requests and WebSocket. **Always add the address you open in the browser (LAN IP · domain)** |
 | `BRAINSTORM_SECURE_COOKIE` | `auto` = Secure only on HTTPS requests |
 | `BRAINSTORM_FACE_DRAFTER` · `BRAINSTORM_FACE_REVIEWER` | Agent ids for face-to-face mode (drafter · reviewer). Leave empty and face-to-face mode cannot be turned on |
 | Others | Size limits · lease · cancel-confirmation wait · call budget — see comments in `deploy/brainstorm.env` |
 
-Put HTTPS in front with a reverse proxy (or Tailscale serve, etc.).
+Put HTTPS and outside access in front (Tailscale serve, a reverse proxy, or an auth proxy) — see `docs/EXTERNAL-ACCESS.md`.
 
 ### Master login · admin CLI
 

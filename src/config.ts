@@ -50,6 +50,8 @@ export interface Config {
   faceReviewer: string;
   faceBaseTurns: number;
   faceMaxTurns: number;
+  /** 기본 언어(마스터 #823) — 마스터가 화면에서 언어를 고르기 전까지 서버 안내·에이전트 규약이 쓰는 언어. 고르면 DB(meta `lang`)가 앞선다 */
+  lang: string;
 }
 
 function int(name: string, def: number): number {
@@ -70,6 +72,26 @@ export function parseListen(s: string): { host: string; port: number }[] {
       if (i < 0) throw new Error(`bad listen entry: ${x}`);
       return { host: x.slice(0, i), port: Number(x.slice(i + 1)) };
     });
+}
+
+/** 루프백 주소인가(127.0.0.0/8 · ::1 · localhost) */
+export function isLoopback(host: string): boolean {
+  const h = host.replace(/^\[|\]$/g, '').toLowerCase();
+  return h === 'localhost' || h === '::1' || /^127\.\d+\.\d+\.\d+$/.test(h);
+}
+
+/**
+ * 외부 공개는 기본으로 꺼져 있다(마스터 #1175). 루프백 밖 주소를 들으려면 BRAINSTORM_ALLOW_EXTERNAL=1 을 같이 둔다.
+ * 밖에서 쓰는 배선(VPN·리버스 프록시·인증 앞단)은 docs/EXTERNAL-ACCESS.md — 에이전트가 사용자에게 묻고 붙인다.
+ */
+export function assertListenAllowed(listen: { host: string }[], env: NodeJS.ProcessEnv = process.env): void {
+  const outside = listen.filter((l) => !isLoopback(l.host)).map((l) => l.host);
+  if (!outside.length) return;
+  if (/^(1|true|yes|on)$/i.test(env.BRAINSTORM_ALLOW_EXTERNAL ?? '')) return;
+  throw new Error(
+    `BRAINSTORM_LISTEN 에 루프백 밖 주소(${outside.join(', ')})가 있다 — 외부 공개는 기본으로 꺼져 있다. ` +
+      '열려면 BRAINSTORM_ALLOW_EXTERNAL=1 을 함께 두고 docs/EXTERNAL-ACCESS.md 를 따른다.',
+  );
 }
 
 export function loadConfig(over: Partial<Config> = {}): Config {
@@ -115,6 +137,7 @@ export function loadConfig(over: Partial<Config> = {}): Config {
     faceReviewer: process.env.BRAINSTORM_FACE_REVIEWER || '',
     faceBaseTurns: int('BRAINSTORM_FACE_BASE_TURNS', 4),
     faceMaxTurns: int('BRAINSTORM_FACE_MAX_TURNS', 6),
+    lang: process.env.BRAINSTORM_LANG || 'ko',
   };
   const merged = { ...cfg, ...over };
   if (over.dataDir) {

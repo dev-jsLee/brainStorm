@@ -10,7 +10,7 @@
 
 /** 끝난 위임을 레인 범위(노트블록)로 남겨 두는 시간 — 서버 목록 ?recent= 와 같다 */
 const CLAIM_RECENT_S = 86400;
-const CLAIM_STATE = { queued: '대기', running: '작업 중', blocked: '막힘', done: '끝', cancelled: '취소됨' };
+const CLAIM_STATE = { queued: t('claims.state.queued'), running: t('claims.state.running'), blocked: t('claims.state.blocked'), done: t('claims.state.done'), cancelled: t('claims.state.cancelled') };
 
 /** assignee 문자열에서 결정적으로 뽑는 색(같은 백수 = 같은 색) — FNV-1a 해시 → 황금각 색상환 */
 function claimColor(assignee) {
@@ -56,7 +56,7 @@ function claimScene(delegations, now = Date.now()) {
   const lanes = new Map();
   const laneOf = (c) => {
     const key = c.kind === 'resource' ? 'resource:' : `path:${c.repo}`;
-    if (!lanes.has(key)) lanes.set(key, { key, kind: c.kind, repo: c.kind === 'resource' ? null : c.repo, label: c.kind === 'resource' ? '자원' : c.repo, cells: new Map(), stack: [] });
+    if (!lanes.has(key)) lanes.set(key, { key, kind: c.kind, repo: c.kind === 'resource' ? null : c.repo, label: c.kind === 'resource' ? t('claims.resources') : c.repo, cells: new Map(), stack: [] });
     return lanes.get(key);
   };
   for (const d of delegations)
@@ -138,8 +138,8 @@ function renderClaims() {
   const box = $('claims-lanes');
   if (!box) return;
   if (!S.dlg) {
-    box.replaceChildren(el('p', { class: 'muted small' }, '불러오는 중…'));
-    loadClaims().catch((e) => box.replaceChildren(el('p', { class: 'err small' }, `불러오지 못함: ${e.message}`)));
+    box.replaceChildren(el('p', { class: 'muted small' }, t('claims.loading')));
+    loadClaims().catch((e) => box.replaceChildren(el('p', { class: 'err small' }, t('claims.load_failed', { error: e.message }))));
     return;
   }
   const scene = claimScene(S.dlg);
@@ -153,7 +153,7 @@ function renderClaims() {
   const fx = claimsReduceMotion() ? claimSceneDiff(null, scene) : claimSceneDiff(S.claimScene, scene);
   S.claimScene = scene;
   if (!scene.lanes.length) {
-    box.replaceChildren(el('p', { class: 'muted small' }, '선점이 없습니다. 위임을 만들면 그 범위가 여기 노트블록으로 놓입니다.'));
+    box.replaceChildren(el('p', { class: 'muted small' }, t('claims.empty')));
     renderClaimDetail();
     return;
   }
@@ -162,7 +162,7 @@ function renderClaims() {
       const n = l.cells.length;
       const col = new Map(l.cells.map((c, i) => [c.key, i + 1]));
       const sky = Math.max(l.stack.length, 1);
-      const grid = el('div', { class: 'cl-grid', role: 'group', 'aria-label': `${l.label} 레인` });
+      const grid = el('div', { class: 'cl-grid', role: 'group', 'aria-label': t('claims.lane_aria', { label: l.label }) });
       grid.style.setProperty('--n', String(n));
       // 대기 행: 오래된 것(stack[0])이 노트블록 바로 위
       l.stack.forEach((r, i) => {
@@ -171,7 +171,7 @@ function renderClaims() {
         for (const k of r.keys) {
           const b = el(
             'button',
-            { type: 'button', class: `cl-q${fall ? ' fall' : ''}${S.claimSel === r.delegation.id ? ' sel' : ''}`, 'data-dlg': r.delegation.id, 'data-key': k, title: `${r.delegation.assignee} · 대기 — ${r.delegation.title}`, onclick: () => selectClaim(r.delegation.id) },
+            { type: 'button', class: `cl-q${fall ? ' fall' : ''}${S.claimSel === r.delegation.id ? ' sel' : ''}`, 'data-dlg': r.delegation.id, 'data-key': k, title: t('claims.queued_title', { assignee: r.delegation.assignee, title: r.delegation.title }), onclick: () => selectClaim(r.delegation.id) },
             r.delegation.assignee,
           );
           b.style.setProperty('--c', r.delegation.color);
@@ -202,7 +202,7 @@ function renderClaims() {
             class: cls.join(' '),
             'data-key': c.key,
             'data-dlg': h?.id ?? false,
-            title: h ? `${c.label} — ${h.assignee} · ${CLAIM_STATE[h.status] ?? h.status}` : `${c.label} — 비어 있음`,
+            title: h ? `${c.label} — ${h.assignee} · ${CLAIM_STATE[h.status] ?? h.status}` : t('claims.cell_empty', { label: c.label }),
             onclick: () => h && selectClaim(h.id),
           },
           el('span', { class: 'cl-label' }, c.label),
@@ -211,7 +211,7 @@ function renderClaims() {
                 'span',
                 { class: 'cl-parts' },
                 c.parts.map((p) => {
-                  const i = el('i', { title: `${p.assignee} — 안쪽 일부` });
+                  const i = el('i', { title: t('claims.part_title', { assignee: p.assignee }) });
                   i.style.setProperty('--c', p.color);
                   return i;
                 }),
@@ -224,7 +224,7 @@ function renderClaims() {
         b.style.gridRow = String(sky + 1);
         grid.append(b);
       }
-      return el('section', { class: 'cl-lane', 'data-lane': l.key }, el('h4', {}, l.label, el('span', { class: 'muted small' }, ` · 블록 ${n}${l.stack.length ? ` · 대기 ${new Set(l.stack.map((r) => r.delegation.id)).size}` : ''}`)), el('div', { class: 'cl-board' }, grid));
+      return el('section', { class: 'cl-lane', 'data-lane': l.key }, el('h4', {}, l.label, el('span', { class: 'muted small' }, ` · ${t('claims.lane_blocks', { n })}${l.stack.length ? ` · ${t('claims.lane_waiting', { n: new Set(l.stack.map((r) => r.delegation.id)).size })}` : ''}`)), el('div', { class: 'cl-board' }, grid));
     }),
   );
   renderClaimDetail();
@@ -241,15 +241,15 @@ function renderClaimDetail() {
   const box = $('claims-detail');
   if (!box) return;
   const d = S.claimSel && S.claimScene?.delegations.get(S.claimSel);
-  if (!d) return box.replaceChildren(el('p', { class: 'muted small' }, '블록을 누르면 그 위임이 보입니다.'));
+  if (!d) return box.replaceChildren(el('p', { class: 'muted small' }, t('claims.pick_hint')));
   const kv = (k, v) => [el('dt', {}, k), el('dd', {}, v)];
-  const state = d.waiting ? '대기(겹쳐 못 들어감)' : (CLAIM_STATE[d.status] ?? d.status);
+  const state = d.waiting ? t('claims.waiting_state') : (CLAIM_STATE[d.status] ?? d.status);
   const sw = el('span', { class: 'cl-sw', 'aria-hidden': 'true' });
   sw.style.setProperty('--c', d.color);
   box.replaceChildren(
     el('div', { class: 'cl-d1' }, sw, el('b', {}, d.title)),
-    el('dl', { class: 'kv small' }, kv('백수', d.assignee), kv('상태', state), kv('명세', d.spec1 || '—'), kv('만든 때', fmtTime(d.created_at)), d.finished_at ? kv('끝난 때', fmtTime(d.finished_at)) : null),
-    d.waiting && S.me?.is_master ? el('div', { class: 'controls' }, el('button', { type: 'button', class: 'primary', id: 'cl-admit', onclick: () => admitClaim(d.id) }, '진입')) : null,
+    el('dl', { class: 'kv small' }, kv(t('claims.assignee'), d.assignee), kv(t('claims.status'), state), kv(t('claims.spec'), d.spec1 || '—'), kv(t('claims.created'), fmtTime(d.created_at)), d.finished_at ? kv(t('claims.finished'), fmtTime(d.finished_at)) : null),
+    d.waiting && S.me?.is_master ? el('div', { class: 'controls' }, el('button', { type: 'button', class: 'primary', id: 'cl-admit', onclick: () => admitClaim(d.id) }, t('claims.admit'))) : null,
     el('p', { id: 'cl-msg', class: 'small', role: 'status' }),
   );
 }
@@ -259,11 +259,11 @@ async function admitClaim(id) {
   const msg = () => $('cl-msg');
   try {
     await api('POST', `/api/delegations/${encodeURIComponent(id)}/admit`);
-    if (msg()) msg().textContent = '진입했습니다.';
+    if (msg()) msg().textContent = t('claims.admitted');
     await loadClaims();
   } catch (e) {
     const who = e.json?.conflicts?.map((c) => `${c.assignee}(${c.scope})`).join(', ');
-    if (msg()) msg().textContent = e.code === 'claim_conflict' ? `아직 겹칩니다 — ${who}` : `진입 못 함: ${e.message}`;
+    if (msg()) msg().textContent = e.code === 'claim_conflict' ? t('claims.still_conflict', { who }) : t('claims.admit_failed', { error: e.message });
   }
 }
 
