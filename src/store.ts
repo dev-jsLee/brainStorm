@@ -63,7 +63,10 @@ import {
   type ThreadMode,
 } from './protocol.js';
 import { DEFAULT_LANG, dictionaries, languages, normLang, protocolWords, t as tr } from './i18n.js';
-import { applyTurn, diffLines, docLines, parseFaceAnswer, replaceIssueLines, type LineOrigin } from './face.js';
+import type { FaceStore } from './modules/face/store.js';
+import type { MergeStore } from './modules/merge/store.js';
+import { parseHold, parseRequest, toHold, type RequestStore } from './modules/requests/store.js';
+import type { DelegationStore } from './modules/delegations/store.js';
 
 export class ApiError extends Error {
   constructor(
@@ -175,9 +178,9 @@ function safeFileName(name: string): string {
   return (name || 'file').replace(/[^\p{L}\p{N}._ -]/gu, '_').slice(0, 120) || 'file';
 }
 
-type Row = Record<string, any>;
+export type Row = Record<string, any>;
 
-const now = () => Date.now();
+export const now = () => Date.now();
 
 function toParticipant(r: Row): Participant {
   return r.disabled_at ? { id: r.id, kind: r.kind, name: r.name, is_master: !!r.is_master, disabled: true } : { id: r.id, kind: r.kind, name: r.name, is_master: !!r.is_master };
@@ -204,10 +207,7 @@ function toThread(r: Row): Thread {
 }
 
 /** 합침 묶음을 에이전트에게 펼칠 때의 출처 이름 · 길이 상한(넘으면 앞 글부터 덜어 냄) */
-const MERGE_KIND = new Set(['instruction', 'quote', 'observation', 'proposal', 'request']);
-const MERGE_MAX_CHARS = 120_000;
-
-function toMessage(r: Row): Message {
+export function toMessage(r: Row): Message {
   return {
     seq: r.seq,
     id: r.id,
@@ -234,7 +234,7 @@ function toMessage(r: Row): Message {
  * 끝줄 신호를 읽을 자리: 마지막 비어 있지 않은 줄의 번호. 끝에 붙은 `답변시각:` 도장 줄(Claude Code 훅 · 값 유무 무관)과
  * 그 앞의 빈 줄·구분선은 건너뛴다 — 도장이 «보류:»·«요청→»·«→ 이름»·«← 스레드»를 묻지 않게(정규식은 protocol 의 ANSWER_STAMP_RE 하나)
  */
-function signalTail(body: string): { lines: string[]; i: number } {
+export function signalTail(body: string): { lines: string[]; i: number } {
   const lines = body.replace(/\r\n/g, '\n').split('\n');
   let i = lines.length - 1;
   for (;;) {
@@ -303,62 +303,6 @@ export function parseHandoff(
   const rest = lines.slice(0, i).join('\n').trim();
   if (!ids.length || !rest) return { body, handoff_to: [], raw: lines[i].trim() };
   return { body: rest, handoff_to: ids, raw: lines[i].trim() };
-}
-
-/**
- * 요청 신호(2026-10-16 마스터 #352): 답의 마지막 비어 있지 않은 줄이 `요청→ 이름`(또는 `요청 -> 이름` · 굵게 등 꾸밈 허용)이면
- * 그 이름을 후보(이 스레드의 다른 에이전트)에서 찾는다. 받는 이는 한 명 — 둘 이상 적었으면 찾은 것들은 넘김 버튼으로만 떨어진다(to = null).
- * 줄을 떼는 규칙은 parseHandoff 와 같다 — 못 찾으면 줄을 두고, 신호만 있는 답도 줄을 둔다. 허용 짝인지는 부르는 쪽(completeRun)이 본다.
- */
-export function parseRequest(
-  body: string,
-  candidates: { id: string; name: string }[],
-): { body: string; to: string | null; matched: string[]; raw: string | null } {
-  const { lines, i } = signalTail(body);
-  if (i < 0) return { body, to: null, matched: [], raw: null };
-  const m = new RegExp(`^\\s*[*_\`]*\\s*(?:${protocolWords('proto.request')})\\s*(?:→|->)\\s*(.+?)\\s*[*_\`]*\\s*$`, 'i').exec(lines[i]);
-  if (!m) return { body, to: null, matched: [], raw: null };
-  const want = m[1].split(/\s*[,，、]\s*/).map((x) => x.trim().toLowerCase()).filter(Boolean);
-  const ids: string[] = [];
-  for (const w of want) {
-    const c = candidates.find((x) => x.id.toLowerCase() === w || x.name.trim().toLowerCase() === w);
-    if (c && !ids.includes(c.id)) ids.push(c.id);
-  }
-  const raw = lines[i].trim();
-  const rest = lines.slice(0, i).join('\n').trim();
-  if (!ids.length || !rest) return { body, to: null, matched: [], raw };
-  return { body: rest, to: want.length === 1 && ids.length === 1 ? ids[0] : null, matched: ids, raw };
-}
-
-/**
- * 보류 신호(마스터 #352 «예외 처리»): 요청을 받은 실행의 답 마지막 비어 있지 않은 줄이 `보류: 사유`(또는 `보류 — 사유`)면 보류다.
- * 사유가 비면 보류가 아니다(그냥 답). note = 그 줄 위의 설명(없으면 null). 요청이 아닌 실행에서는 부르지 않는다
- */
-export function parseHold(body: string): { reason: string; note: string | null } | null {
-  const { lines, i } = signalTail(body);
-  if (i < 0) return null;
-  const m = new RegExp(`^\\s*[*_\`]*\\s*(?:${protocolWords('proto.hold')})\\s*(?:[:：]|—)\\s*(.+?)\\s*[*_\`]*\\s*$`, 'i').exec(lines[i]);
-  if (!m || !m[1].trim()) return null;
-  const note = lines.slice(0, i).join('\n').trim();
-  return { reason: m[1].trim().slice(0, 500), note: note ? note.slice(0, 4000) : null };
-}
-
-function toHold(r: Row): RequestHold {
-  return {
-    id: r.id,
-    thread_id: r.thread_id,
-    request_seq: r.request_seq ?? null,
-    requester_id: r.requester_id,
-    recipient_id: r.recipient_id,
-    kind: r.kind,
-    reason: r.reason,
-    note: r.note ?? null,
-    run_id: r.run_id ?? null,
-    created_at: r.created_at,
-    acked_at: r.acked_at ?? null,
-    acked_by: r.acked_by ?? null,
-    notified_run_id: r.notified_run_id ?? null,
-  };
 }
 
 /** 취소 처리 결과 판정(정책 1). 화면의 «중단 결과» 칸과 취소 결과 화면이 이것 하나만 본다 */
@@ -478,100 +422,18 @@ function toSession(r: Row): AgentSession {
   };
 }
 
-function optInt(v: unknown, name: string): number | null {
+export function optInt(v: unknown, name: string): number | null {
   if (v === undefined || v === null) return null;
   if (typeof v !== 'number' || !Number.isInteger(v)) throw new ApiError(400, 'bad_request', `${name} must be an integer`);
   return v;
 }
 
-function reqString(v: unknown, name: string, max: number): string {
+export function reqString(v: unknown, name: string, max: number): string {
   if (typeof v !== 'string' || v.length === 0) throw new ApiError(400, 'bad_request', `${name} required`);
   if (v.length > max) throw new ApiError(413, 'too_large', `${name} exceeds ${max} chars`);
   return v;
 }
 
-export interface DelegationInput {
-  thread_id?: unknown;
-  source_seq?: unknown;
-  assignee?: unknown;
-  title?: unknown;
-  spec?: unknown;
-  version_slot?: unknown;
-  claims?: unknown;
-  /** true 면 겹칠 때 409 대신 대기(queued · 선점 전부 granted=0)로 만든다 — 마이그레이션 13 */
-  queue?: unknown;
-  /** 서버가 인증으로 정한다 — 다른 값을 내밀면 403 impersonation */
-  created_by?: unknown;
-}
-
-const MAX_CLAIMS = 50;
-
-/**
- * 선점 한 줄 다듬기(위임 대장). path: '//' 접기 · 앞 '/'·'./' 와 가운데 '.' 마디 걷기 · '..' 이나 빈 값은 400
- * (저장소 전체는 '' 가 아니라 '*') · 끝 '/'(폴더)는 지킨다. resource: 앞뒤 공백만 걷고 그대로 비교한다.
- */
-export function normalizeClaim(v: unknown): ClaimInput {
-  if (!v || typeof v !== 'object' || Array.isArray(v)) throw new ApiError(400, 'bad_claim', 'claim must be {kind, repo, scope}');
-  const c = v as Record<string, unknown>;
-  if (!CLAIM_KINDS.includes(c.kind as ClaimKind)) throw new ApiError(400, 'bad_claim', `kind: ${CLAIM_KINDS.join(' | ')}`);
-  const kind = c.kind as ClaimKind;
-  const repo = typeof c.repo === 'string' ? c.repo.trim() : '';
-  if (!repo || repo.length > 64) throw new ApiError(400, 'bad_claim', 'repo required (≤64 chars)');
-  let scope = typeof c.scope === 'string' ? c.scope.trim() : '';
-  if (scope.length > 512) throw new ApiError(400, 'bad_scope', 'scope exceeds 512 chars');
-  if (kind === 'path' && scope !== '*') {
-    const segs = scope.split('/');
-    if (segs.includes('..')) throw new ApiError(400, 'bad_scope', "'..' is not allowed");
-    const kept = segs.filter((x) => x !== '' && x !== '.');
-    scope = kept.length ? kept.join('/') + (scope.endsWith('/') ? '/' : '') : '';
-  }
-  if (!scope) throw new ApiError(400, 'bad_scope', kind === 'path' ? "empty scope — use '*' for the whole repo" : 'scope required');
-  return { kind, repo, scope };
-}
-
-/** 두 선점이 겹치나. path = 같은 저장소 + 한쪽이 다른 쪽의 접두('*' 는 저장소 전체) · resource = (repo, scope) 정확히 같음 */
-export function claimsOverlap(a: ClaimInput, b: ClaimInput): boolean {
-  if (a.kind !== b.kind || a.repo !== b.repo) return false;
-  if (a.kind === 'resource') return a.scope === b.scope;
-  return a.scope === '*' || b.scope === '*' || a.scope.startsWith(b.scope) || b.scope.startsWith(a.scope);
-}
-
-function toClaim(r: Row): DelegationClaim {
-  return {
-    id: r.id,
-    delegation_id: r.delegation_id,
-    kind: r.kind,
-    repo: r.repo,
-    scope: r.scope,
-    origin: r.origin,
-    claimed_at: r.claimed_at,
-    released_at: r.released_at ?? null,
-    granted: r.granted !== 0,
-  };
-}
-
-function toDelegation(r: Row, claims: DelegationClaim[]): Delegation {
-  return {
-    id: r.id,
-    thread_id: r.thread_id ?? null,
-    source_seq: r.source_seq ?? null,
-    assignee: r.assignee,
-    title: r.title,
-    spec: r.spec,
-    version_slot: r.version_slot ?? null,
-    status: r.status,
-    created_by: r.created_by,
-    created_at: r.created_at,
-    updated_at: r.updated_at,
-    finished_at: r.finished_at ?? null,
-    result: r.result ?? null,
-    last_seen_at: r.last_seen_at ?? null,
-    waiting: !DELEGATION_CLOSED.includes(r.status) && claims.some((c) => !c.granted && c.released_at === null),
-    claims,
-  };
-}
-
-/** 전달 메모(#740) — 길이 상한 · 받는 쪽에 싣는 머리(글 안의 같은 문자열은 무디게) */
 export const FORWARD_NOTE_MAX = 4000;
 const FORWARD_NOTE_HEAD = '[마스터 전달 메모';
 const FORWARD_NOTE_HEAD_INERT = '[(인용) 마스터 전달 메모';
@@ -589,6 +451,14 @@ function inertForwardHeads(body: string): string {
 
 export class Store {
   readonly events = new EventEmitter();
+  /** 대면 모듈(src/modules/face) — 켜졌을 때만 붙는다(docs/MODULES.md) */
+  face: FaceStore | null = null;
+  /** 합치기 모듈(src/modules/merge) */
+  merge: MergeStore | null = null;
+  /** 요청 모듈(src/modules/requests) — 꺼지면 요청·보류가 없고 «요청→»은 그냥 글이다 */
+  requests: RequestStore | null = null;
+  /** 위임 대장 모듈(src/modules/delegations) */
+  delegations: DelegationStore | null = null;
 
   constructor(
     readonly db: DB,
@@ -599,7 +469,7 @@ export class Store {
     this.ensureRoom();
   }
 
-  private emit(e: NoticeEvent) {
+  /** @internal 모듈(src/modules)도 부른다 */ emit(e: NoticeEvent) {
     this.events.emit('notice', e);
   }
 
@@ -680,7 +550,7 @@ export class Store {
   }
 
   /** 거부: 감사 한 줄(묶음) + ApiError. reason 은 감사에 남는 사유(응답 코드와 다를 수 있다 — 비멤버 읽기는 404 no_thread 지만 사유는 not_member) */
-  private deny(
+  /** @internal 모듈(src/modules)도 부른다 */ deny(
     pr: Principal,
     err: ApiError,
     a: { action: string; target_type?: string; target_id?: string | null; thread_id?: string | null; reason?: string },
@@ -700,7 +570,7 @@ export class Store {
   }
 
   /** 실행 중단 요청의 최종 결과를 요청 행과 같은 감사 식별자로 남긴다(정책 9 «요청과 최종 처리 결과를 같은 감사 식별자로»). 트랜잭션 안에서 부른다 */
-  private auditCancelFinal(r: Row, state: RunState, outcome: string, t: number, by?: string) {
+  /** @internal 모듈(src/modules)도 부른다 */ auditCancelFinal(r: Row, state: RunState, outcome: string, t: number, by?: string) {
     if (r.cancel_requested_at == null) return;
     const req = this.db
       .prepare("SELECT corr_id FROM audit_log WHERE action = 'run.cancel' AND target_id = ? AND result = 'requested' ORDER BY id DESC LIMIT 1")
@@ -840,12 +710,12 @@ export class Store {
   }
 
   /** 작성자 표시명 — 끈 참여자도 이름은 남는다 */
-  private nameOf(id: string): string {
+  /** @internal 모듈(src/modules)도 부른다 */ nameOf(id: string): string {
     return ((this.db.prepare('SELECT name FROM participants WHERE id = ?').get(id) as Row | undefined)?.name as string) ?? id;
   }
 
   /**
-   * 참여자 끄기(관리 CLI · 2026-10-19 마스터 #441 «메티를 비활성화하고 숨겨둬»).
+   * 참여자 끄기(관리 CLI · 2026-10-19 마스터 #441 «비활성화하고 숨겨둬»).
    * 글·감사 기록은 그대로 두고, 들어오는 길과 보이는 자리를 걷는다:
    * 토큰 전부 폐기 · 활성 세션 은퇴 · 대기 실행·배달 취소 · 스레드 멤버 해제 · 기본 수신자·요청 짝에서 뺀다.
    * 뺀 스레드 목록은 감사 before 에 남는다(되살릴 때 그 목록으로 member set). 마스터는 끌 수 없다.
@@ -1159,7 +1029,7 @@ export class Store {
 
   // ───────────────────────── 권한 ─────────────────────────
 
-  private membership(threadId: string, pid: string): Row | undefined {
+  /** @internal 모듈(src/modules)도 부른다 */ membership(threadId: string, pid: string): Row | undefined {
     return this.db.prepare('SELECT * FROM thread_members WHERE thread_id = ? AND participant_id = ?').get(threadId, pid) as
       | Row
       | undefined;
@@ -1172,7 +1042,7 @@ export class Store {
     return !!this.membership(threadId, pid)?.can_read;
   }
 
-  private requireThread(threadId: string): Row {
+  /** @internal 모듈(src/modules)도 부른다 */ requireThread(threadId: string): Row {
     const t = this.db.prepare('SELECT * FROM threads WHERE id = ?').get(threadId) as Row | undefined;
     if (!t) throw new ApiError(404, 'no_thread');
     return t;
@@ -1185,7 +1055,7 @@ export class Store {
   }
 
   /** readOnly = 조회만 하는 자리(스레드·메시지·맥락·실행·배달 목록). 거기서만 `read_all` 이 멤버 검사를 대신한다 */
-  private requireRead(pr: Principal, threadId: string, action = 'thread.read', readOnly = false): Row {
+  /** @internal 모듈(src/modules)도 부른다 */ requireRead(pr: Principal, threadId: string, action = 'thread.read', readOnly = false): Row {
     const t = this.db.prepare('SELECT * FROM threads WHERE id = ?').get(threadId) as Row | undefined;
     if (!t) throw new ApiError(404, 'no_thread');
     if (t.deleted_at && !pr.participant.is_master) throw new ApiError(404, 'no_thread');
@@ -1195,7 +1065,7 @@ export class Store {
   }
 
   /** 마스터만. 거절은 감사에 남는다 — action = 시도한 작업 */
-  private requireMaster(pr: Principal, action: string, target: { target_type?: string; target_id?: string | null; thread_id?: string | null } = {}) {
+  /** @internal 모듈(src/modules)도 부른다 */ requireMaster(pr: Principal, action: string, target: { target_type?: string; target_id?: string | null; thread_id?: string | null } = {}) {
     if (!pr.participant.is_master || pr.via !== 'cookie') this.deny(pr, new ApiError(403, 'master_only'), { action, ...target });
   }
 
@@ -1315,14 +1185,14 @@ export class Store {
       })),
       sessions,
       // 합치기(#706): 하위 스레드면 지난 합침들과 아직 안 합친 제 글 수
-      ...(t.parent_thread_id
+      ...(t.parent_thread_id && this.merge
         ? {
             merges: (this.db.prepare('SELECT message_seq, parent_thread_id, from_seq, to_seq, count, created_at FROM thread_merges WHERE child_thread_id = ? ORDER BY message_seq').all(threadId) as Row[]).map((r) => ({ ...r })),
-            unmerged: this.unmergedOf(threadId).rows.length,
+            unmerged: this.merge.unmergedOf(threadId).rows.length,
           }
         : {}),
       // 마스터 화면만: 이 스레드의 보류된 요청(확인 안 한 것 먼저) — 머리 «보류된 요청 N» · 보조 패널 «실행» 탭
-      ...(pr.participant.is_master && pr.via === 'cookie'
+      ...(this.requests && pr.participant.is_master && pr.via === 'cookie'
         ? { request_holds: (this.db.prepare('SELECT * FROM request_holds WHERE thread_id = ? ORDER BY acked_at IS NOT NULL, created_at DESC LIMIT 100').all(threadId) as Row[]).map(toHold) }
         : {}),
     };
@@ -1548,126 +1418,10 @@ export class Store {
     return map;
   }
 
-  private withAttachments(msgs: Message[]): Message[] {
+  /** @internal */ withAttachments(msgs: Message[]): Message[] {
     const map = this.attachmentsFor(msgs.map((m) => m.seq));
-    const mg = this.mergesFor(msgs.map((m) => m.seq));
-    return msgs.map((m) => ({ ...m, attachments: map.get(m.seq) ?? [], ...(mg.has(m.seq) ? { merge: mg.get(m.seq) } : {}) }));
-  }
-
-  /** 합침 묶음 글(마이그레이션 17)의 출처 — 묶음이 아닌 글은 안 든다 */
-  private mergesFor(seqs: number[]): Map<number, MergeInfo> {
-    const map = new Map<number, MergeInfo>();
-    if (seqs.length === 0) return map;
-    const rows = this.db
-      .prepare(
-        `SELECT g.*, t.title AS child_title FROM thread_merges g LEFT JOIN threads t ON t.id = g.child_thread_id
-         WHERE g.message_seq IN (${seqs.map(() => '?').join(',')})`,
-      )
-      .all(...seqs) as Row[];
-    for (const r of rows)
-      map.set(r.message_seq, { child_thread_id: r.child_thread_id, child_title: r.child_title ?? tr(this.lang(), 'srv.deleted_thread'), from_seq: r.from_seq, to_seq: r.to_seq, count: r.count });
-    return map;
-  }
-
-  /** 합침 묶음 글 → 에이전트에게 실을 본문: 머리 + 옮긴 글 전문(그 스레드에서의 작성자·출처와 함께). 너무 길면 앞 글부터 덜어 낸다 */
-  private mergeTranscript(m: Message): string {
-    const g = m.merge!;
-    const rows = this.db
-      .prepare(
-        `SELECT m.seq, m.body, m.source_kind, p.name, p.is_master FROM messages m JOIN participants p ON p.id = m.author_id
-         WHERE m.thread_id = ? AND m.seq BETWEEN ? AND ? ORDER BY m.seq`,
-      )
-      .all(g.child_thread_id, g.from_seq, g.to_seq) as Row[];
-    const lang = this.lang();
-    const parts = rows.map((r) => `#${r.seq} ${r.name}${r.is_master ? tr(lang, 'srv.merge.master_mark') : ''} · ${MERGE_KIND.has(r.source_kind as string) ? tr(lang, `srv.merge.kind.${r.source_kind}`) : r.source_kind}\n${r.body}`);
-    let total = parts.reduce((n, x) => n + x.length + 2, 0);
-    let dropped = 0;
-    while (parts.length > 1 && total > MERGE_MAX_CHARS) {
-      total -= parts.shift()!.length + 2;
-      dropped++;
-    }
-    const t = g.child_title;
-    return [
-      m.body,
-      '',
-      tr(lang, 'srv.merge.intro', { title: t }),
-      '',
-      tr(lang, 'srv.merge.start', { title: t }),
-      ...(dropped ? [tr(lang, 'srv.merge.dropped', { n: dropped }), ''] : []),
-      parts.join('\n\n'),
-      tr(lang, 'srv.merge.end', { title: t }),
-    ].join('\n');
-  }
-
-  /** 하위 스레드의 아직 안 합친 제 글(마지막 합침 뒤) */
-  private unmergedOf(childId: string): { last: number; rows: Row[] } {
-    const last = ((this.db.prepare('SELECT MAX(to_seq) AS s FROM thread_merges WHERE child_thread_id = ?').get(childId) as Row).s as number | null) ?? 0;
-    const rows = this.db.prepare('SELECT seq FROM messages WHERE thread_id = ? AND seq > ? ORDER BY seq').all(childId, last) as Row[];
-    return { last, rows };
-  }
-
-  /**
-   * 하위 스레드 합치기(2026-10-21 마스터 #706 · 마스터만): 하위 스레드의 제 글(분기 때 가져온 맥락 빼고 · 지난 합침 뒤)을
-   * 바로 위 대화(스레드 또는 메인 채팅방)에 묶음 글 하나로 옮긴다. 묶음 글은 마스터 이름의 보통 글(출처 «인용» · 받는 이 없음 — 아무도 안 부른다)이라
-   * 이어서 쓰는 다음 글의 맥락에 실리고, 에이전트에게는 옮긴 글 전문으로 펼쳐진다(mergeTranscript).
-   * 합친 뒤 상위만 남는다(2026-10-27 마스터 #962): 하위 스레드는 보관(읽기 전용)·숨김이 되고 대기 중 전달은 거둔다 — 묶음 상자의 [스레드 열기]·«숨김» 필터로는 그대로 열리고
-   * 보관 해제·숨김 해제로 되돌린다. 그 아래 분기는 상위 대화로 올려 붙여(parent_thread_id) 목록에 남긴다. 실행 중이면 409 runs_active.
-   */
-  mergeThread(pr: Principal, childId: string): { message: Message; parent: { id: string; title: string; kind: Thread['kind'] }; duplicate: boolean } {
-    this.requireMaster(pr, 'thread.merge', { target_type: 'thread', target_id: childId, thread_id: childId });
-    const child = this.requireRead(pr, childId);
-    if (child.kind === 'room' || !child.parent_thread_id) throw new ApiError(409, 'no_parent', '합칠 상위 대화가 없다(메인 채팅방·부모 없는 스레드)', undefined, { key: 'err.no_parent' });
-    if (child.deleted_at) throw new ApiError(409, 'thread_deleted');
-    const parent = this.requireThread(child.parent_thread_id as string);
-    if (parent.deleted_at) throw new ApiError(409, 'parent_deleted', '상위 대화가 휴지통에 있다', undefined, { key: 'err.parent_deleted' });
-    if (parent.status !== 'open') throw new ApiError(409, 'parent_closed', '상위 대화가 보관돼 있다', undefined, { key: 'err.parent_closed' });
-    const active = this.db.prepare("SELECT COUNT(*) AS n FROM runs WHERE thread_id = ? AND state IN ('queued','running')").get(childId) as Row;
-    if ((active.n as number) > 0)
-      throw new ApiError(409, 'runs_active', `실행 중인 run ${active.n}개 — 먼저 멈춘다`, undefined, { key: 'err.runs_active', vars: { n: active.n } });
-    const me = pr.participant.id;
-    const t = now();
-    let kids: string[] = [];
-    const res = this.db.transaction(() => {
-      const { last, rows } = this.unmergedOf(childId);
-      if (!rows.length) throw new ApiError(409, 'nothing_to_merge', last ? '지난 합침 뒤 새 글이 없다' : '하위 스레드에 글이 없다', undefined, { key: last ? 'err.nothing_to_merge.since_last' : 'err.nothing_to_merge.empty' });
-      const from = rows[0].seq as number;
-      const to = rows[rows.length - 1].seq as number;
-      const lang = this.lang();
-      const body = tr(lang, 'srv.merge.body', { title: child.title, n: rows.length, from, to, since: last ? tr(lang, 'srv.merge.since_last') : '' });
-      const info = this.db
-        .prepare(
-          `INSERT INTO messages(id, thread_id, author_id, client_key, body, source_kind, input_mode, recipients, hop, created_at)
-           VALUES (?,?,?,?,?, 'quote', 'text', '[]', 0, ?)`,
-        )
-        .run(newId('msg'), parent.id, me, `merge:${childId}:${to}`, body, t);
-      const seq = Number(info.lastInsertRowid);
-      this.db
-        .prepare('INSERT INTO thread_merges(message_seq, child_thread_id, parent_thread_id, from_seq, to_seq, count, created_by, created_at) VALUES (?,?,?,?,?,?,?,?)')
-        .run(seq, childId, parent.id, from, to, rows.length, me, t);
-      this.db.prepare('UPDATE threads SET updated_at = ? WHERE id = ?').run(t, parent.id);
-      // 상위만 남긴다(#962): 아래 분기는 상위로 올려 붙이고, 하위 스레드는 보관 + 숨김 · 대기 중 전달은 거둔다
-      kids = (this.db.prepare('SELECT id FROM threads WHERE parent_thread_id = ?').all(childId) as Row[]).map((r) => r.id as string);
-      this.db.prepare('UPDATE threads SET parent_thread_id = ? WHERE parent_thread_id = ?').run(parent.id, childId);
-      this.db.prepare("UPDATE threads SET status = 'archived', hidden = 1, updated_at = ? WHERE id = ?").run(t, childId);
-      const withdrawn = this.db
-        .prepare(`UPDATE deliveries SET status = 'cancelled', last_error = 'merged', lease_token_hash = NULL, updated_at = ? WHERE thread_id = ? AND status IN ('pending','leased')`)
-        .run(t, childId).changes;
-      this.audit({
-        actor: this.actorOf(pr),
-        action: 'thread.merge',
-        target_type: 'thread',
-        target_id: childId,
-        thread_id: parent.id as string,
-        result: 'ok',
-        after: { parent_thread_id: parent.id, message_seq: seq, from_seq: from, to_seq: to, count: rows.length, again: !!last, child: 'archived+hidden', reparented: kids, withdrawn_deliveries: withdrawn },
-      });
-      return seq;
-    })();
-    this.emit({ notice: { t: 'msg', thread_id: parent.id as string, seq: res }, threadId: parent.id as string });
-    this.emit({ notice: { t: 'thread', thread_id: childId }, threadId: childId });
-    for (const id of kids) this.emit({ notice: { t: 'thread', thread_id: id }, threadId: id });
-    const [message] = this.withAttachments([toMessage(this.db.prepare('SELECT * FROM messages WHERE seq = ?').get(res) as Row)]);
-    return { message, parent: { id: parent.id as string, title: parent.title as string, kind: parent.kind === 'room' ? 'room' : 'thread' }, duplicate: false };
+    const mg = this.merge?.mergesFor(msgs.map((m) => m.seq));
+    return msgs.map((m) => ({ ...m, attachments: map.get(m.seq) ?? [], ...(mg?.has(m.seq) ? { merge: mg.get(m.seq) } : {}) }));
   }
 
   listMessages(pr: Principal, threadId: string, after = 0, limit = 200): { messages: Message[]; next_cursor: number; has_more: boolean } {
@@ -1746,23 +1500,26 @@ export class Store {
       recipients = [...new Set(input.recipients as string[])];
     }
     // 대면 모드(마스터 #581): 마스터 글의 받는 이는 서버가 정한다 — 새 라운드면 초안 쪽 · 질문 답이면 물은 쪽 · 도는 중이면 글만
-    const face = human && thread.mode === 'face' && thread.kind !== 'room';
-    if (face) {
+    // 대면 모듈이 꺼져 있으면(BRAINSTORM_MODULES · 마스터 #1207) 대면 모드였던 스레드도 보통 채팅으로 돈다
+    const fm = human && thread.mode === 'face' && thread.kind !== 'room' ? this.face : null;
+    const face = !!fm;
+    if (fm) {
       recipients = [];
-      const fr = this.faceLatest(threadId);
-      if (!thread.invoke_paused && !(fr && (fr.state === 'running' || fr.state === 'question'))) this.faceCheckMembers(threadId);
+      const fr = fm.faceLatest(threadId);
+      if (!thread.invoke_paused && !(fr && (fr.state === 'running' || fr.state === 'question'))) fm.faceCheckMembers(threadId);
     }
     // 요청(마스터 #352): 에이전트 간 호출 금지의 유일한 예외 — 출처 request · 받는 이 한 명 · 허용 짝 · 새 호출 금지 아님 · 연쇄 상한 안
     const request = sourceKind === 'request';
     if (request) {
-      if (human) dn('source_kind_forbidden', 'request is for agents');
+      if (human || !this.requests) dn('source_kind_forbidden', 'request is for agents');
+      const rq = this.requests!;
       if (recipients.length !== 1) throw new ApiError(400, 'bad_recipients', '요청은 받는 이 한 명', undefined, { key: 'err.bad_recipients.request_one' });
-      const why = this.requestBlock(thread, me.id, recipients[0]);
+      const why = rq.requestBlock(thread, me.id, recipients[0]);
       if (why === 'request_pair_not_allowed') dn(why, `${me.id} → ${recipients[0]} 는 허용 짝이 아니다`, { key: 'err.request_pair_not_allowed', vars: { from: me.id, to: recipients[0] } });
       if (why === 'invoke_paused')
         this.deny(pr, new ApiError(409, 'invoke_paused', '새 호출 금지 중', undefined, { key: 'err.invoke_paused.paused' }), { action: 'request.create', target_type: 'thread', target_id: threadId, thread_id: threadId });
       if (why === 'request_chain_limit') {
-        this.recordHold({ thread_id: threadId, request_seq: null, requester_id: me.id, recipient_id: recipients[0], kind: 'chain_limit', reason: 'request_chain_limit', note: body.slice(0, 4000), run_id: null });
+        rq.recordHold({ thread_id: threadId, request_seq: null, requester_id: me.id, recipient_id: recipients[0], kind: 'chain_limit', reason: 'request_chain_limit', note: body.slice(0, 4000), run_id: null });
         this.deny(pr, new ApiError(409, 'request_chain_limit', `마스터 글 뒤 요청 ${this.cfg.requestChainMax}개 — 마스터 확인 필요`, undefined, { key: 'err.request_chain_limit', vars: { max: this.cfg.requestChainMax } }), {
           action: 'request.create', target_type: 'thread', target_id: threadId, thread_id: threadId,
         });
@@ -1813,7 +1570,7 @@ export class Store {
       }
       const ds: string[] = [];
       if (face && !thread.invoke_paused) {
-        const f = this.faceMasterPost(threadId, seq, t);
+        const f = fm!.faceMasterPost(threadId, seq, t);
         faceRound = f.round;
         if (f.to) {
           const did = newId('dlv');
@@ -1835,7 +1592,7 @@ export class Store {
         }
       }
       this.db.prepare('UPDATE threads SET updated_at = ? WHERE id = ?').run(t, threadId);
-      if (request) this.auditRequest(pr, threadId, seq, recipients[0], 'ok', null, ds[0] ?? null);
+      if (request) this.requests!.auditRequest(pr, threadId, seq, recipients[0], 'ok', null, ds[0] ?? null);
       const row = this.db.prepare('SELECT * FROM messages WHERE seq = ?').get(seq) as Row;
       return { message: toMessage(row), duplicate: false, deliveries: ds };
     })();
@@ -1844,7 +1601,7 @@ export class Store {
       if (result.deliveries.length)
         for (const r of recipients) this.emit({ notice: { t: 'delivery', thread_id: threadId }, threadId, only: r });
       if (faceTo) this.emit({ notice: { t: 'delivery', thread_id: threadId }, threadId, only: faceTo });
-      if (faceRound) this.faceEmit(this.faceRow(faceRound.id)!);
+      if (faceRound) fm!.faceEmit(fm!.faceRow(faceRound.id)!);
     }
     return {
       ...result,
@@ -2045,7 +1802,7 @@ export class Store {
   }
 
   /**
-   * 이어받은 맥락(새 세대의 첫 실행에만): 사서의 가장 최근 요약 글(이 스레드 · 원인 이전) + baalda 원문 위치 안내.
+   * 이어받은 맥락(새 세대의 첫 실행에만): 사서의 가장 최근 요약 글(이 스레드 · 원인 이전) + 원문 사본 위치 안내.
    * 원문으로는 최근 cfg.carryMessages 개만 실린다(base_seq). 첫 실행이 끝나면 다음부터는 안 붙는다.
    */
   private carryFor(session: Row, threadId: string, uptoSeq: number): ClaimCarry | null {
@@ -2069,8 +1826,9 @@ export class Store {
       from_generation: (session.generation as number) - 1,
       reason: (session.reason as string) ?? '',
       thread_title: th.title as string,
-      // 사서 bs-export.py 와 같은 이름 규칙(제목의 금지 글자 → _ · 80자 · (id 의 th_ 뒤))
+      // 외부 내보내기와 같은 이름 규칙(제목의 금지 글자 → _ · 80자 · (id 의 th_ 뒤))
       thread_note: `brainStorm/${String(th.title).replace(/[\\/:*?"<>|\n]/g, '_').trim().slice(0, 80)} (${threadId.slice(3)}).md`,
+      older_hint: this.cfg.carryHint || undefined,
       older_messages: older,
       base_seq: (session.base_seq as number) ?? null,
       summary: sum ? { seq: sum.seq as number, author_name: this.nameOf(sum.author_id as string), body: (sum.body as string).slice(0, 12000), created_at: sum.created_at as number } : null,
@@ -2141,17 +1899,17 @@ export class Store {
   // ───────────────────────── 전달 · 실행 ─────────────────────────
 
   /** 실행 이력 한 줄. 본문·토큰은 넣지 않는다 */
-  private ev(runId: string, event: string, source: string, detail?: Record<string, unknown> | null, t = now()) {
+  /** @internal 모듈(src/modules)도 부른다 */ ev(runId: string, event: string, source: string, detail?: Record<string, unknown> | null, t = now()) {
     this.db
       .prepare('INSERT INTO run_events(run_id, at, event, source, detail) VALUES (?,?,?,?,?)')
       .run(runId, t, event, source, detail ? JSON.stringify(detail).slice(0, 2000) : null);
   }
 
-  private runRow(runId: string): Row | undefined {
+  /** @internal 모듈(src/modules)도 부른다 */ runRow(runId: string): Row | undefined {
     return this.db.prepare('SELECT * FROM runs WHERE id = ?').get(runId) as Row | undefined;
   }
 
-  private toRunOut(r: Row): Run {
+  /** @internal 모듈(src/modules)도 부른다 */ toRunOut(r: Row): Run {
     return toRun(r, this.cfg.cancelAckMs);
   }
 
@@ -2302,9 +2060,10 @@ export class Store {
             .run(d.message_seq, session.id);
           this.ev(rid, 'created', 'server', { worker, generation: session.generation, delivery_id: d.id, context: ctx.length }, t);
           // 보류 알림(#374): 이 에이전트가 이 스레드에서 보낸 요청이 보류됐고 아직 안 알렸으면 이 실행에 한 번 싣는다(세대 무관 · 사유 없음)
-          this.db
-            .prepare("UPDATE request_holds SET notified_run_id = ? WHERE thread_id = ? AND requester_id = ? AND kind = 'held' AND notified_run_id IS NULL")
-            .run(rid, d.thread_id, me);
+          if (this.requests)
+            this.db
+              .prepare("UPDATE request_holds SET notified_run_id = ? WHERE thread_id = ? AND requester_id = ? AND kind = 'held' AND notified_run_id IS NULL")
+              .run(rid, d.thread_id, me);
           run = this.db.prepare('SELECT * FROM runs WHERE id = ?').get(rid) as Row;
         }
         const [trigger] = this.withAttachments([toMessage(this.db.prepare('SELECT * FROM messages WHERE seq = ?').get(d.message_seq) as Row)]);
@@ -2334,7 +2093,7 @@ export class Store {
           }
         }
         // 합침 묶음 글(#706)은 옮긴 글 전문으로 펼친다 — 화면엔 머리 한 줄 + 묶음, 에이전트에겐 전문
-        for (const m of [trigger, ...context]) if (m.merge) m.body = this.mergeTranscript(m);
+        for (const m of [trigger, ...context]) if (m.merge) m.body = this.merge!.mergeTranscript(m);
         // 전달 메모(#740): 글 안의 꾸민 머리는 무디게 하고(사칭 방지) 마스터 메모를 전달된 글 끝 블록으로 싣는다 — 어댑터는 본문을 그대로 그린다
         for (const m of [trigger, ...context]) if (m.body) m.body = inertForwardHeads(m.body);
         //   어댑터는 원인 글을 맥락 쪽 사본(같은 seq)으로 그리므로 둘 다에 붙인다
@@ -2368,7 +2127,8 @@ export class Store {
             ? ({ by: d.forwarded_by as string, context_upto_seq: Math.max(d.context_upto_seq as number, d.message_seq as number), note: (d.forward_note as string) ?? null } satisfies ClaimForward)
             : null,
           carry: this.carryFor(session, d.thread_id, d.message_seq as number),
-          face: this.faceForClaim(d.thread_id, d.message_seq as number, me),
+          face: this.face?.faceForClaim(d.thread_id, d.message_seq as number, me) ?? null,
+          request_rule: !!this.requests,
           hold_notices: (
             this.db.prepare('SELECT id, request_seq FROM request_holds WHERE notified_run_id = ? ORDER BY created_at').all(run.id) as Row[]
           ).map((h) => ({ hold_id: h.id as string, request_seq: (h.request_seq as number) ?? null }) satisfies ClaimHoldNotice),
@@ -2402,7 +2162,7 @@ export class Store {
   }
 
   /** 실행 소유권 확인: 이 어댑터가 받은 run_token 이어야 한다 */
-  private ownRun(pr: Principal, runId: string, runToken: unknown): Row {
+  /** @internal */ ownRun(pr: Principal, runId: string, runToken: unknown): Row {
     this.requireAdapter(pr, 'adapter.run', { target_type: 'run', target_id: runId });
     this.sweep();
     const r = this.db.prepare('SELECT * FROM runs WHERE id = ?').get(runId) as Row | undefined;
@@ -2534,13 +2294,13 @@ export class Store {
     const sk0 = (input.source_kind ?? 'proposal') as SourceKind;
     if (!SOURCE_KINDS.includes(sk0) || sk0 === 'instruction' || sk0 === 'request') throw new ApiError(403, 'source_kind_forbidden');
     // 대면 턴(마스터 #581): 끝줄 신호를 읽지 않고 합의문·질문을 본다 → 판·안건·다음 차례
-    const faceRound = this.faceTurnRound(r.thread_id, r.trigger_seq, pr.participant.id);
-    if (faceRound) return this.completeFace(pr, r, faceRound, rawBody, sk0, input);
+    const faceRound = this.face?.faceTurnRound(r.thread_id, r.trigger_seq, pr.participant.id);
+    if (faceRound) return this.face!.completeFace(pr, r, faceRound, rawBody, sk0, input);
     const trigRow = this.db.prepare('SELECT hop, source_kind, recipients, author_id FROM messages WHERE seq = ?').get(r.trigger_seq) as Row;
     // 보류(마스터 #352 «예외 처리»): 나에게 온 요청에 끝줄 «보류: 사유»로 답하면 스레드에 안 올리고 request_holds 에 남긴다 — 요청한 쪽도 안 깨운다
-    if (trigRow.source_kind === 'request' && (JSON.parse(trigRow.recipients) as string[]).includes(pr.participant.id)) {
+    if (this.requests && trigRow.source_kind === 'request' && (JSON.parse(trigRow.recipients) as string[]).includes(pr.participant.id)) {
       const hold = parseHold(rawBody);
-      if (hold) return this.completeHeld(pr, r, trigRow, hold, input);
+      if (hold) return this.requests.completeHeld(pr, r, trigRow, hold, input);
     }
     // 끝줄 신호 셋(→ 넘김 · 요청→ · ← 끌어오기)은 어느 순서로 와도 뗀다
     const hoC = this.handoffCandidates(r.thread_id, pr.participant.id);
@@ -2571,6 +2331,7 @@ export class Store {
           finalBody = h.body;
           continue;
         }
+        if (!this.requests) break;
         const q = parseRequest(finalBody, hoC);
         rqRaw ??= q.raw;
         if (q.matched.length) {
@@ -2585,7 +2346,7 @@ export class Store {
     }
     // 요청: 허용 짝 · 받는 이가 읽음 · 새 호출 금지 아님 · 연쇄 상한 안이면 바로 그 에이전트에게 배달. 아니면 기존 넘김 버튼으로 떨어진다(답은 잃지 않는다)
     const thRow = this.requireThread(r.thread_id);
-    const rqBlock = rqTo ? this.requestBlock(thRow, pr.participant.id, rqTo) : null;
+    const rqBlock = rqTo ? this.requests!.requestBlock(thRow, pr.participant.id, rqTo) : null;
     const asRequest = !!rqTo && !rqBlock;
     if (rqTo && rqBlock) handoff = [rqTo];
     const ho = { handoff_to: handoff, raw: hoRaw };
@@ -2623,12 +2384,12 @@ export class Store {
           .run(did, seq, r.thread_id, rqTo, t, t);
         requestDelivery = did;
         this.ev(r.id, 'request_sent', 'server', { to: rqTo, delivery_id: did, result_seq: seq }, t);
-        this.auditRequest(pr, r.thread_id, seq, rqTo!, 'ok', null, did);
+        this.requests!.auditRequest(pr, r.thread_id, seq, rqTo!, 'ok', null, did);
       } else if (rqTo && rqBlock) {
         this.ev(r.id, 'request_refused', 'server', { to: rqTo, reason: rqBlock }, t);
         if (rqBlock === 'request_chain_limit')
-          this.recordHold({ thread_id: r.thread_id, request_seq: seq, requester_id: pr.participant.id, recipient_id: rqTo, kind: 'chain_limit', reason: 'request_chain_limit', note: null, run_id: r.id });
-        this.auditRequest(pr, r.thread_id, seq, rqTo, 'denied', rqBlock, null);
+          this.requests!.recordHold({ thread_id: r.thread_id, request_seq: seq, requester_id: pr.participant.id, recipient_id: rqTo, kind: 'chain_limit', reason: 'request_chain_limit', note: null, run_id: r.id });
+        this.requests!.auditRequest(pr, r.thread_id, seq, rqTo, 'denied', rqBlock, null);
       }
       this.db
         .prepare(
@@ -2655,45 +2416,6 @@ export class Store {
     return { run, message: toMessage(this.db.prepare('SELECT * FROM messages WHERE seq = ?').get(seq) as Row), duplicate: false };
   }
 
-  /**
-   * 보류로 끝내기: 실행은 succeeded(어댑터는 할 일을 다 했다) · 답 글 없음 · 요청 글까지 본 것으로(seen_upto) · request_holds 한 줄 · 감사 request.hold.
-   * 요청한 쪽에게 배달을 만들지 않는다 — 깨우지 않는다. 마스터는 스레드 머리 «보류된 요청 N»과 보조 패널에서 본다
-   */
-  private completeHeld(pr: Principal, r: Row, trig: Row, hold: { reason: string; note: string | null }, input: { usage?: unknown; runtime?: unknown; model?: unknown }) {
-    const t = now();
-    const usage = input.usage === undefined ? null : JSON.stringify(input.usage).slice(0, 4000);
-    const duringCancel = r.cancel_requested_at != null;
-    const h = this.db.transaction(() => {
-      this.db
-        .prepare("UPDATE runs SET state = 'succeeded', ended_at = ?, finalized_at = ?, usage = ?, result_seq = NULL, seen_upto = ?, lease_expires_at = NULL WHERE id = ?")
-        .run(t, t, usage, r.trigger_seq, r.id);
-      const h = this.recordHold({
-        thread_id: r.thread_id, request_seq: r.trigger_seq, requester_id: trig.author_id, recipient_id: pr.participant.id,
-        kind: 'held', reason: hold.reason, note: hold.note, run_id: r.id,
-      });
-      this.ev(r.id, 'completed', pr.participant.id, { result_seq: null, held: h.id, during_cancel: duringCancel }, t);
-      this.ev(r.id, 'request_held', 'server', { hold_id: h.id, requester: trig.author_id }, t);
-      this.ev(r.id, 'finalized', 'server', duringCancel ? { state: 'succeeded', completed_first: true } : { state: 'succeeded' }, t);
-      if (duringCancel) this.auditCancelFinal(r, 'succeeded', 'completed_first', t, pr.participant.id);
-      this.audit({
-        actor: this.actorOf(pr),
-        action: 'request.hold',
-        target_type: 'message',
-        target_id: String(r.trigger_seq),
-        thread_id: r.thread_id,
-        result: 'ok',
-        after: { hold_id: h.id, requester: trig.author_id, recipient: pr.participant.id, run_id: r.id },
-      });
-      const str = (v: unknown) => (typeof v === 'string' && v.trim() ? v.slice(0, 200) : null);
-      this.db
-        .prepare('UPDATE agent_sessions SET runtime = COALESCE(?, runtime), actual_model = COALESCE(?, actual_model) WHERE id = ?')
-        .run(str(input.runtime), str(input.model), r.session_id);
-      return h;
-    })();
-    this.emit({ notice: { t: 'run', thread_id: r.thread_id, run_id: r.id, state: 'succeeded' }, threadId: r.thread_id });
-    return { run: this.toRunOut(this.runRow(r.id)!), message: null, held: h, duplicate: false };
-  }
-
   failRun(pr: Principal, runId: string, input: { run_token?: unknown; error?: unknown }) {
     const r = this.ownRun(pr, runId, input.run_token);
     if (r.state !== 'running' && r.state !== 'queued') {
@@ -2710,7 +2432,7 @@ export class Store {
       this.ev(r.id, 'failed', pr.participant.id, { error: err.slice(0, 200), during_cancel: duringCancel }, t);
       this.ev(r.id, 'finalized', 'server', duringCancel ? { state: 'failed', failed_first: true } : { state: 'failed' }, t);
       if (duringCancel) this.auditCancelFinal(r, 'failed', 'failed_first', t, pr.participant.id);
-      this.faceOnFail(r, t);
+      this.face?.faceOnFail(r, t);
     })();
     this.emit({ notice: { t: 'run', thread_id: r.thread_id, run_id: r.id, state: 'failed' }, threadId: r.thread_id });
     return { ok: true, state: 'failed' };
@@ -2809,7 +2531,7 @@ export class Store {
     const pulled: ClaimPulled = { thread: { id: src.id as string, title: src.title as string }, from_seq: messages[0].seq, to_seq: messages[messages.length - 1].seq, messages };
     const est = estimateTokens(messages.map((x) => `${x.author_name} ${x.body} ${x.attachments.join(' ')}`).join('\n')) + messages.length * 12;
     const budget = this.lastBudget(agent);
-    // 예산 거울(메티 #158): 받는 쪽이 마지막으로 신고한 예산과 맞댄다 — 넘으면 거절, 1/3 넘으면 경고, 신고 없으면 모름
+    // 예산 거울(#158): 받는 쪽이 마지막으로 신고한 예산과 맞댄다 — 넘으면 거절, 1/3 넘으면 경고, 신고 없으면 모름
     const level = budget === null ? 'unknown' : est > budget ? 'over' : est > budget / 3 ? 'warn' : 'ok';
     return { thread, m, agent, pulled, est, budget, level: level as 'ok' | 'warn' | 'over' | 'unknown' };
   }
@@ -2842,7 +2564,7 @@ export class Store {
     if (p.level === 'over') throw new ApiError(409, 'over_budget', `가져올 것(약 ${p.est}토큰)이 받는 쪽 예산(${p.budget})을 넘는다 — 범위를 좁힌다`, undefined, { key: 'err.over_budget', vars: { est: p.est, budget: p.budget } });
     const t = now();
     const snap = JSON.stringify(p.pulled);
-    // 누른 시점의 스레드 머리 — 청한 글 뒤에 오간 대화도 이번 턴에 싣고, 실어 보낸 데까지만 «본 것»으로 친다(메티 #165 · 수동 전달과 같은 칸)
+    // 누른 시점의 스레드 머리 — 청한 글 뒤에 오간 대화도 이번 턴에 싣고, 실어 보낸 데까지만 «본 것»으로 친다(#165 · 수동 전달과 같은 칸)
     const head = this.threadMaxSeq(threadId) ?? seq;
     const res = this.db.transaction(() => {
       const info = this.db
@@ -2880,126 +2602,6 @@ export class Store {
       this.emit({ notice: { t: 'thread', thread_id: threadId }, threadId });
     }
     return { ok: true, duplicate: res.duplicate, delivery: res.d, level: p.level, est_tokens: p.est, budget_tokens: p.budget, count: p.pulled.messages.length };
-  }
-
-  // ───────────────────────── 요청 창구 (마스터 #352 · 마이그레이션 14) ─────────────────────────
-
-  /**
-   * 요청 연쇄 깊이 = 이 스레드의 마지막 마스터 글 뒤에 쌓인 요청 글 수. 마스터가 그 스레드에 글을 쓰면 0 부터 다시 센다.
-   * 트리거 사슬(hop)이 아니라 스레드 단위로 센다 — 마스터가 끼어들면 도는 왕복도 새로 시작하고, 갈래가 여럿이어도 상한은 하나다
-   */
-  requestChainDepth(threadId: string): number {
-    return (
-      this.db
-        .prepare(
-          `SELECT COUNT(*) AS n FROM messages WHERE thread_id = ? AND source_kind = 'request' AND seq > COALESCE(
-             (SELECT MAX(m.seq) FROM messages m JOIN participants p ON p.id = m.author_id WHERE m.thread_id = ? AND p.is_master = 1), 0)`,
-        )
-        .get(threadId, threadId) as Row
-    ).n as number;
-  }
-
-  /** 요청을 낼 수 없는 까닭(없으면 null). 순서: 허용 짝 → 받는 이가 읽을 수 있나 → 새 호출 금지 → 연쇄 상한 */
-  private requestBlock(thread: Row, from: string, to: string): 'request_pair_not_allowed' | 'bad_recipient' | 'invoke_paused' | 'request_chain_limit' | null {
-    if (!this.db.prepare('SELECT 1 FROM request_pairs WHERE from_id = ? AND to_id = ?').get(from, to)) return 'request_pair_not_allowed';
-    if (!this.membership(thread.id, to)?.can_read) return 'bad_recipient';
-    if (thread.invoke_paused) return 'invoke_paused';
-    if (this.requestChainDepth(thread.id) >= this.cfg.requestChainMax) return 'request_chain_limit';
-    return null;
-  }
-
-  /** 마스터가 봐야 할 요청 한 건을 남기고 스레드 알림(머리의 «보류된 요청 N»). 트랜잭션 안에서 불러도 된다 */
-  private recordHold(h: Omit<RequestHold, 'id' | 'created_at' | 'acked_at' | 'acked_by' | 'notified_run_id'>): RequestHold {
-    const id = newId('rqh');
-    const t = now();
-    this.db
-      .prepare(
-        'INSERT INTO request_holds(id, thread_id, request_seq, requester_id, recipient_id, kind, reason, note, run_id, created_at) VALUES (?,?,?,?,?,?,?,?,?,?)',
-      )
-      .run(id, h.thread_id, h.request_seq, h.requester_id, h.recipient_id, h.kind, h.reason, h.note, h.run_id, t);
-    this.emit({ notice: { t: 'thread', thread_id: h.thread_id }, threadId: h.thread_id });
-    return toHold(this.db.prepare('SELECT * FROM request_holds WHERE id = ?').get(id) as Row);
-  }
-
-  /** 요청 만들기의 감사 한 줄(request.create) — 본문은 싣지 않는다. 거부는 묶음 */
-  private auditRequest(pr: Principal, threadId: string, seq: number | null, to: string, result: 'ok' | 'denied', reason: string | null, deliveryId: string | null) {
-    this.audit({
-      actor: this.actorOf(pr),
-      action: 'request.create',
-      target_type: 'message',
-      target_id: seq === null ? null : String(seq),
-      thread_id: threadId,
-      result,
-      reason,
-      after: { from: pr.participant.id, to, delivery_id: deliveryId, depth: this.requestChainDepth(threadId) },
-      group: result !== 'ok',
-    });
-  }
-
-  /** 스레드의 보류된 요청(마스터만 · 확인 안 한 것 먼저 · 최근 100건) */
-  listRequestHolds(pr: Principal, threadId: string): RequestHold[] {
-    this.requireMaster(pr, 'request.holds_view', { target_type: 'thread', target_id: threadId, thread_id: threadId });
-    this.requireThread(threadId);
-    return (
-      this.db
-        .prepare('SELECT * FROM request_holds WHERE thread_id = ? ORDER BY acked_at IS NOT NULL, created_at DESC LIMIT 100')
-        .all(threadId) as Row[]
-    ).map(toHold);
-  }
-
-  /** 마스터의 «확인함» — 머리 경고에서 빠진다. 두 번째는 noop */
-  ackRequestHold(pr: Principal, holdId: string): { ok: true; outcome: 'acked' | 'already_acked'; hold: RequestHold } {
-    this.requireMaster(pr, 'request.hold_ack', { target_type: 'request_hold', target_id: holdId });
-    const r = this.db.prepare('SELECT * FROM request_holds WHERE id = ?').get(holdId) as Row | undefined;
-    if (!r) throw new ApiError(404, 'no_hold');
-    const t = now();
-    const outcome = r.acked_at ? 'already_acked' : 'acked';
-    this.db.transaction(() => {
-      if (!r.acked_at) this.db.prepare('UPDATE request_holds SET acked_at = ?, acked_by = ? WHERE id = ? AND acked_at IS NULL').run(t, pr.participant.id, holdId);
-      this.audit({
-        actor: this.actorOf(pr),
-        action: 'request.hold_ack',
-        target_type: 'request_hold',
-        target_id: holdId,
-        thread_id: r.thread_id,
-        result: r.acked_at ? 'noop' : 'ok',
-        reason: r.acked_at ? 'already_acked' : null,
-        before: { kind: r.kind, request_seq: r.request_seq, requester: r.requester_id, recipient: r.recipient_id, acked_at: r.acked_at ?? null },
-      });
-    })();
-    if (!r.acked_at) this.emit({ notice: { t: 'thread', thread_id: r.thread_id }, threadId: r.thread_id });
-    return { ok: true, outcome, hold: toHold(this.db.prepare('SELECT * FROM request_holds WHERE id = ?').get(holdId) as Row) };
-  }
-
-  /** 허용 짝 목록(방향 있음) */
-  listRequestPairs(): RequestPair[] {
-    return this.db.prepare('SELECT from_id, to_id, created_at, created_by FROM request_pairs ORDER BY from_id, to_id').all() as RequestPair[];
-  }
-
-  /** 허용 짝 더하기·빼기 — 마스터만(CLI 는 cli:root 로 남는다). 참여자가 아직 없어도 된다(id 는 안정 키) */
-  setRequestPair(pr: Principal, from: unknown, to: unknown, on: boolean): { ok: true; changed: boolean; pairs: RequestPair[] } {
-    const action = on ? 'request_pair.add' : 'request_pair.remove';
-    this.requireMaster(pr, action, { target_type: 'request_pair', target_id: `${String(from)}>${String(to)}` });
-    const idOk = (v: unknown): v is string => typeof v === 'string' && /^[a-z0-9_-]{1,64}$/.test(v);
-    // from === to(자기 짝)도 받는다 — 세션 밖 긴 일(bs-job)이 끝나면 자기에게 «요청»을 내 다시 불리는 길(2026-10-22 #820 뒤 마스터 결정 · 연쇄 상한 그대로)
-    if (!idOk(from) || !idOk(to)) throw new ApiError(400, 'bad_pair', 'from·to 는 참여자 id', undefined, { key: 'err.bad_pair' });
-    const target = `${from}>${to}`;
-    const changed = this.db.transaction(() => {
-      const n = on
-        ? this.db.prepare('INSERT OR IGNORE INTO request_pairs(from_id, to_id, created_at, created_by) VALUES (?,?,?,?)').run(from, to, now(), this.actorOf(pr).id).changes
-        : this.db.prepare('DELETE FROM request_pairs WHERE from_id = ? AND to_id = ?').run(from, to).changes;
-      this.audit({
-        actor: this.actorOf(pr),
-        action,
-        target_type: 'request_pair',
-        target_id: target,
-        result: n ? 'ok' : 'noop',
-        reason: n ? null : on ? 'already_allowed' : 'not_allowed',
-        after: { from, to, allowed: on },
-      });
-      return n > 0;
-    })();
-    return { ok: true, changed, pairs: this.listRequestPairs() };
   }
 
   /** 넘김 신호의 후보 = 이 스레드에서 읽을 수 있는 다른 에이전트 */
@@ -3198,7 +2800,7 @@ export class Store {
    *   running → 요청만 기록(«중단 요청됨»). heartbeat 가 cancel 을 싣고, 어댑터 확인이면 cancelled, cancelAckMs 무응답이면 unknown
    *   그 밖   → 상태를 바꾸지 않는다(이벤트만)
    */
-  private requestCancel(r: Row, who: string, t: number, actor?: AuditActor): CancelResult {
+  /** @internal 모듈(src/modules)도 부른다 */ requestCancel(r: Row, who: string, t: number, actor?: AuditActor): CancelResult {
     const o = this.requestCancelInner(r, who, t);
     // 실행 취소·중단(정책 9). 실행 중이면 «요청»만 — 최종 결과는 auditCancelFinal 이 같은 감사 식별자로 잇는다
     const a = actor ?? { id: who, kind: 'master' as const };
@@ -3516,768 +3118,6 @@ export class Store {
     if (res.outcome === 'cancelled') this.emit({ notice: { t: 'thread', thread_id: res.d.thread_id }, threadId: res.d.thread_id });
     const d = this.db.prepare('SELECT id, message_seq, thread_id, recipient_id, status, last_error FROM deliveries WHERE id = ?').get(deliveryId);
     return { ok: true, outcome: res.outcome, delivery: d };
-  }
-
-  // ───────────────────────── 위임 대장 (마이그레이션 12 · 마스터 #339·#341) ─────────────────────────
-
-  /**
-   * 위임 대장 권한 — 여기 한곳뿐이다.
-   *   view    : 인증된 참여자 누구나(마스터 쿠키 · 에이전트 토큰)
-   *   create  : 마스터 또는 에이전트
-   *   update  : 선점 추가 · 상태 · heartbeat — 만든 이 · 마스터 · 아무 에이전트(백수 세션 여럿이 한 에이전트 자격 증명 아래 돈다)
-   *   release : 강제 놓기 — 마스터 또는 만든 이만
-   *   admit   : 대기 위임 진입(마이그레이션 13) — 마스터 또는 만든 이만(=«먼저 해도 된다»는 승인)
-   * 작업자는 늘 인증이 정한다(created_by 를 내밀어 사칭하면 403 impersonation — createDelegation).
-   */
-  private delegationGate(pr: Principal, action: 'view' | 'create' | 'update' | 'release' | 'admit', d?: Row) {
-    const p = pr.participant;
-    const master = !!p.is_master && pr.via === 'cookie';
-    const agent = p.kind === 'agent' && pr.via === 'token';
-    const target = { action: `delegation.${action}`, target_type: 'delegation', target_id: d?.id ?? null, thread_id: d?.thread_id ?? null };
-    if (!master && !agent) this.deny(pr, new ApiError(403, 'forbidden'), { ...target, reason: 'master_or_agent_only' });
-    if ((action === 'release' || action === 'admit') && !master && d?.created_by !== p.id) this.deny(pr, new ApiError(403, 'not_owner', 'master or creator only'), target);
-  }
-
-  private delegationRow(id: string): Row {
-    const d = this.db.prepare('SELECT * FROM delegations WHERE id = ?').get(id) as Row | undefined;
-    if (!d) throw new ApiError(404, 'no_delegation');
-    return d;
-  }
-
-  private delegationOut(id: string): Delegation {
-    const claims = (this.db.prepare('SELECT * FROM claims WHERE delegation_id = ? ORDER BY id').all(id) as Row[]).map(toClaim);
-    return toDelegation(this.delegationRow(id), claims);
-  }
-
-  private claimList(v: unknown): ClaimInput[] {
-    if (!Array.isArray(v) || v.length === 0) throw new ApiError(400, 'claims_required', 'claims: [{kind, repo, scope}, …]');
-    if (v.length > MAX_CLAIMS) throw new ApiError(400, 'too_many_claims', `≤${MAX_CLAIMS}`);
-    return v.map(normalizeClaim);
-  }
-
-  /** 다른 활성 위임(선점을 놓지 않았고 done·cancelled 가 아님)의 잡힌(granted=1) 선점 중 겹치는 것 — 대기 줄은 남을 막지 않는다. 트랜잭션 안에서 부른다 */
-  private claimConflicts(wanted: ClaimInput[], selfId: string | null): ClaimConflict[] {
-    const q = this.db.prepare(
-      `SELECT c.kind, c.repo, c.scope, d.id AS delegation_id, d.assignee, d.title FROM claims c JOIN delegations d ON d.id = c.delegation_id
-       WHERE c.released_at IS NULL AND c.granted = 1 AND d.status NOT IN ('done','cancelled') AND d.id IS NOT ? AND c.repo = ? AND c.kind = ?`,
-    );
-    const out: ClaimConflict[] = [];
-    const seen = new Set<string>();
-    for (const w of wanted)
-      for (const r of q.all(selfId, w.repo, w.kind) as Row[]) {
-        if (!claimsOverlap(w, r as ClaimInput)) continue;
-        const k = `${r.delegation_id}|${r.repo}|${r.scope}|${w.scope}`;
-        if (seen.has(k)) continue;
-        seen.add(k);
-        out.push({ delegation_id: r.delegation_id, assignee: r.assignee, title: r.title, kind: r.kind, repo: r.repo, scope: r.scope, wanted: w.scope });
-      }
-    return out;
-  }
-
-  private insertClaims(id: string, claims: ClaimInput[], origin: 'initial' | 'added', t: number, granted = true) {
-    const ins = this.db.prepare('INSERT INTO claims(delegation_id, kind, repo, scope, origin, claimed_at, granted) VALUES (?,?,?,?,?,?,?)');
-    for (const c of claims) ins.run(id, c.kind, c.repo, c.scope, origin, t, granted ? 1 : 0);
-  }
-
-  /** 대기 위임인가(놓지 않은 granted=0 줄이 있다). 대기 위임은 admit 전에는 running·blocked 로도, 선점 추가로도 못 간다 */
-  private delegationWaiting(id: string): boolean {
-    return !!this.db.prepare('SELECT 1 FROM claims WHERE delegation_id = ? AND granted = 0 AND released_at IS NULL LIMIT 1').get(id);
-  }
-
-  /** 선점 충돌 거절: 감사 한 줄(denied claim_conflict) + 409 {error:'claim_conflict', conflicts}. 트랜잭션 밖에서 부른다(안에서 던지면 감사 행도 되돌려진다) */
-  private claimDenied(pr: Principal, action: string, d: { id: string | null; thread_id: string | null }, wanted: ClaimInput[], conflicts: ClaimConflict[], after: Record<string, unknown> = {}): never {
-    this.audit({
-      actor: this.actorOf(pr),
-      action,
-      target_type: 'delegation',
-      target_id: d.id,
-      thread_id: d.thread_id,
-      result: 'denied',
-      reason: 'claim_conflict',
-      after: { ...after, wanted, conflicts: conflicts.map((c) => ({ delegation_id: c.delegation_id, repo: c.repo, scope: c.scope })) },
-    });
-    throw new ApiError(409, 'claim_conflict', `${conflicts.length} claim(s) held by other delegations`, { conflicts });
-  }
-
-  /**
-   * 위임 만들기: 선점 검사와 넣기가 IMMEDIATE 트랜잭션 하나 — 둘이 동시에 청해도 하나만 이긴다. 선점은 전부 아니면 전무.
-   * 겹치면 아무것도 만들지 않고 409 claim_conflict(conflicts = 겹친 위임·담당·제목·저장소·범위).
-   * queue:true 면 겹칠 때 거절 대신 대기로 만든다 — queued · 선점 줄 전부 granted=0(안 겹친 줄도 · 부분 진입 없음) · 응답에 conflicts.
-   * 진입은 admitDelegation(마스터·만든 이) — 자동 진입은 없다(마스터 #345 «먼저 작업해도 되면 들어가겠지»).
-   */
-  createDelegation(pr: Principal, input: DelegationInput = {}): { delegation: Delegation; queued?: true; conflicts?: ClaimConflict[] } {
-    this.delegationGate(pr, 'create');
-    if (input.created_by !== undefined && input.created_by !== pr.participant.id)
-      this.deny(pr, new ApiError(403, 'impersonation', 'created_by is set by the server'), { action: 'delegation.create', target_type: 'delegation' });
-    const assignee = reqString(input.assignee, 'assignee', 64).trim();
-    const title = reqString(input.title, 'title', 200).trim();
-    if (!assignee || !title) throw new ApiError(400, 'bad_request', 'assignee, title required');
-    const spec = reqString(input.spec, 'spec', 100_000);
-    let slot: VersionSlot | null = null;
-    if (input.version_slot !== undefined && input.version_slot !== null) {
-      if (!VERSION_SLOTS.includes(input.version_slot as VersionSlot)) throw new ApiError(400, 'bad_request', `version_slot: ${VERSION_SLOTS.join(' | ')}`);
-      slot = input.version_slot as VersionSlot;
-    }
-    const threadId = input.thread_id === undefined || input.thread_id === null ? null : reqString(input.thread_id, 'thread_id', 64);
-    if (threadId) this.requireRead(pr, threadId, 'delegation.create', true);
-    const sourceSeq = optInt(input.source_seq, 'source_seq');
-    const claims = this.claimList(input.claims);
-    if (input.queue !== undefined && typeof input.queue !== 'boolean') throw new ApiError(400, 'bad_request', 'queue: boolean');
-    const queue = input.queue === true;
-    const id = newId('dlg');
-    const t = now();
-    let waited: ClaimConflict[] = [];
-    const conflicts = this.db
-      .transaction(() => {
-        const c = this.claimConflicts(claims, null);
-        if (c.length && !queue) return c;
-        waited = c;
-        this.db
-          .prepare(
-            `INSERT INTO delegations(id, thread_id, source_seq, assignee, title, spec, version_slot, status, created_by, created_at, updated_at)
-             VALUES (?,?,?,?,?,?,?,'queued',?,?,?)`,
-          )
-          .run(id, threadId, sourceSeq, assignee, title, spec, slot, pr.participant.id, t, t);
-        this.insertClaims(id, claims, 'initial', t, c.length === 0);
-        this.audit({
-          actor: this.actorOf(pr),
-          action: 'delegation.create',
-          target_type: 'delegation',
-          target_id: id,
-          thread_id: threadId,
-          result: 'ok',
-          ...(c.length ? { reason: 'queued' } : {}),
-          after: { assignee, title, version_slot: slot, claims, ...(c.length ? { conflicts: c.map((x) => ({ delegation_id: x.delegation_id, repo: x.repo, scope: x.scope })) } : {}) },
-        });
-        return [];
-      })
-      .immediate();
-    if (conflicts.length) this.claimDenied(pr, 'delegation.create', { id: null, thread_id: threadId }, claims, conflicts, { assignee, title });
-    this.emit({ notice: { t: 'delegation', id, status: 'queued' }, threadId: null });
-    return waited.length ? { delegation: this.delegationOut(id), queued: true, conflicts: waited } : { delegation: this.delegationOut(id) };
-  }
-
-  /**
-   * 대기 위임 진입(마이그레이션 13): IMMEDIATE 트랜잭션 안에서 대기 줄을 다시 검사 → 다 비었으면 전부 granted=1 · running.
-   * 아직 겹치면 409 claim_conflict(아무것도 안 바뀐다 · 위임은 대기 그대로). 대기 줄이 없으면 409 not_waiting. 권한은 마스터·만든 이.
-   */
-  admitDelegation(pr: Principal, id: string): { ok: true; delegation: Delegation } {
-    const d = this.delegationRow(id);
-    this.delegationGate(pr, 'admit', d);
-    const t = now();
-    const res = this.db
-      .transaction(() => {
-        const cur = this.delegationRow(id);
-        if (DELEGATION_CLOSED.includes(cur.status)) return { error: new ApiError(409, 'delegation_closed', `already ${cur.status}`) };
-        const rows = this.db.prepare('SELECT kind, repo, scope FROM claims WHERE delegation_id = ? AND granted = 0 AND released_at IS NULL ORDER BY id').all(id) as Row[];
-        if (!rows.length) return { error: new ApiError(409, 'not_waiting', 'no waiting claims') };
-        const wanted = rows.map((r) => ({ kind: r.kind, repo: r.repo, scope: r.scope }) as ClaimInput);
-        const conflicts = this.claimConflicts(wanted, id);
-        if (conflicts.length) return { wanted, conflicts };
-        this.db.prepare('UPDATE claims SET granted = 1, claimed_at = ? WHERE delegation_id = ? AND granted = 0 AND released_at IS NULL').run(t, id);
-        this.db.prepare("UPDATE delegations SET status = 'running', updated_at = ? WHERE id = ?").run(t, id);
-        this.audit({
-          actor: this.actorOf(pr),
-          action: 'delegation.admit',
-          target_type: 'delegation',
-          target_id: id,
-          thread_id: cur.thread_id,
-          result: 'ok',
-          before: { status: cur.status },
-          after: { status: 'running', granted: rows.length },
-        });
-        return { ok: true as const };
-      })
-      .immediate();
-    if ('error' in res) throw res.error;
-    if ('conflicts' in res) this.claimDenied(pr, 'delegation.admit', { id, thread_id: d.thread_id }, res.wanted!, res.conflicts!);
-    this.emit({ notice: { t: 'delegation', id, status: 'running' }, threadId: null });
-    return { ok: true, delegation: this.delegationOut(id) };
-  }
-
-  /**
-   * 일하는 중 선점 더하기(origin 'added'). 겹치면 기다리지 않고 바로 실패한다(교착 없음) — 위임은 'blocked' 가 되고
-   * 409 claim_conflict. 이미 쥔 선점은 놓지 않는다. 여러 줄이면 전부 아니면 전무.
-   */
-  addClaims(pr: Principal, id: string, input: unknown): { delegation: Delegation } {
-    const d = this.delegationRow(id);
-    this.delegationGate(pr, 'update', d);
-    const claims = this.claimList(input);
-    const t = now();
-    const res = this.db
-      .transaction(() => {
-        const cur = this.delegationRow(id);
-        if (DELEGATION_CLOSED.includes(cur.status)) return { closed: true as const };
-        if (this.delegationWaiting(id)) return { waiting: true as const };
-        const conflicts = this.claimConflicts(claims, id);
-        if (conflicts.length) {
-          if (cur.status !== 'blocked') this.db.prepare("UPDATE delegations SET status = 'blocked', updated_at = ? WHERE id = ?").run(t, id);
-          return { conflicts, before: cur.status as DelegationStatus };
-        }
-        this.insertClaims(id, claims, 'added', t);
-        this.db.prepare('UPDATE delegations SET updated_at = ?, last_seen_at = ? WHERE id = ?').run(t, t, id);
-        this.audit({ actor: this.actorOf(pr), action: 'delegation.claim', target_type: 'delegation', target_id: id, thread_id: cur.thread_id, result: 'ok', after: { claims } });
-        return { conflicts: [] as ClaimConflict[] };
-      })
-      .immediate();
-    if ('closed' in res) throw new ApiError(409, 'delegation_closed', 'done or cancelled');
-    if ('waiting' in res) throw new ApiError(409, 'not_admitted', 'waiting delegation — admit first');
-    if (res.conflicts.length) {
-      if (res.before !== 'blocked') this.emit({ notice: { t: 'delegation', id, status: 'blocked' }, threadId: null });
-      this.claimDenied(pr, 'delegation.claim', { id, thread_id: d.thread_id }, claims, res.conflicts, { before: res.before, status: 'blocked' });
-    }
-    this.emit({ notice: { t: 'delegation', id, status: this.delegationRow(id).status }, threadId: null });
-    return { delegation: this.delegationOut(id) };
-  }
-
-  /** 상태 바꾸기. done·cancelled = 끝(finished_at · 선점을 모두 놓는다 · 다시 못 연다) · queued·running·blocked = 선점을 쥔 채 */
-  setDelegationStatus(pr: Principal, id: string, status: unknown, result?: unknown): { ok: true; changed: boolean; delegation: Delegation } {
-    const d = this.delegationRow(id);
-    this.delegationGate(pr, 'update', d);
-    if (!DELEGATION_STATUSES.includes(status as DelegationStatus)) throw new ApiError(400, 'bad_status', DELEGATION_STATUSES.join(' | '));
-    const next = status as DelegationStatus;
-    const res = result === undefined || result === null ? null : reqString(result, 'result', 20_000);
-    const t = now();
-    const changed = this.db
-      .transaction(() => {
-        const cur = this.delegationRow(id);
-        const closed = DELEGATION_CLOSED.includes(cur.status);
-        if (closed && cur.status !== next) throw new ApiError(409, 'delegation_closed', `already ${cur.status}`);
-        if (cur.status === next && (res === null || res === cur.result)) return false;
-        const closing = DELEGATION_CLOSED.includes(next);
-        // 대기 위임은 admit 으로만 들어간다(running·blocked 로 건너뛰면 겹침 검사를 지나친다) — queued·끝은 된다
-        if (!closed && (next === 'running' || next === 'blocked') && this.delegationWaiting(id)) throw new ApiError(409, 'not_admitted', 'waiting delegation — admit first');
-        this.db
-          .prepare('UPDATE delegations SET status = ?, result = COALESCE(?, result), updated_at = ?, last_seen_at = ?, finished_at = ? WHERE id = ?')
-          .run(next, res, t, t, closing ? (cur.finished_at ?? t) : null, id);
-        const released = closing ? this.db.prepare('UPDATE claims SET released_at = ? WHERE delegation_id = ? AND released_at IS NULL').run(t, id).changes : 0;
-        this.audit({
-          actor: this.actorOf(pr),
-          action: 'delegation.status',
-          target_type: 'delegation',
-          target_id: id,
-          thread_id: cur.thread_id,
-          result: 'ok',
-          before: { status: cur.status },
-          after: { status: next, released },
-        });
-        return true;
-      })
-      .immediate();
-    if (changed) this.emit({ notice: { t: 'delegation', id, status: next }, threadId: null });
-    return { ok: true, changed, delegation: this.delegationOut(id) };
-  }
-
-  /** 백수가 살아 있다는 신호 — last_seen_at 만 갈아 쓴다(감사·알림 없음). 끝난 위임은 409 */
-  delegationHeartbeat(pr: Principal, id: string): { ok: true; id: string; status: DelegationStatus; last_seen_at: number } {
-    const d = this.delegationRow(id);
-    this.delegationGate(pr, 'update', d);
-    if (DELEGATION_CLOSED.includes(d.status)) throw new ApiError(409, 'delegation_closed', `already ${d.status}`);
-    const t = now();
-    this.db.prepare('UPDATE delegations SET last_seen_at = ? WHERE id = ?').run(t, id);
-    return { ok: true, id, status: d.status, last_seen_at: t };
-  }
-
-  /** 강제 놓기(마스터 또는 만든 이): 죽은 백수의 선점을 거둔다 — 'cancelled' + 선점 모두 놓음. 감사 reason 'forced' */
-  releaseStale(pr: Principal, id: string): { ok: true; outcome: 'released' | 'already_closed'; released: number; delegation: Delegation } {
-    const d = this.delegationRow(id);
-    this.delegationGate(pr, 'release', d);
-    const t = now();
-    const out = this.db
-      .transaction(() => {
-        const cur = this.delegationRow(id);
-        const base = { actor: this.actorOf(pr), action: 'delegation.release', target_type: 'delegation', target_id: id, thread_id: cur.thread_id as string | null };
-        if (DELEGATION_CLOSED.includes(cur.status)) {
-          this.audit({ ...base, result: 'noop', reason: 'already_closed', before: { status: cur.status } });
-          return { outcome: 'already_closed' as const, released: 0 };
-        }
-        this.db.prepare("UPDATE delegations SET status = 'cancelled', updated_at = ?, finished_at = ? WHERE id = ?").run(t, t, id);
-        const released = this.db.prepare('UPDATE claims SET released_at = ? WHERE delegation_id = ? AND released_at IS NULL').run(t, id).changes;
-        this.audit({ ...base, result: 'ok', reason: 'forced', before: { status: cur.status, last_seen_at: cur.last_seen_at ?? null }, after: { status: 'cancelled', released } });
-        return { outcome: 'released' as const, released };
-      })
-      .immediate();
-    if (out.outcome === 'released') this.emit({ notice: { t: 'delegation', id, status: 'cancelled' }, threadId: null });
-    return { ok: true, ...out, delegation: this.delegationOut(id) };
-  }
-
-  /**
-   * 위임 목록(선점 포함 · 최근 순). active = done·cancelled 가 아닌 것만 ·
-   * recent=초(active 와 함께 · ≤7일) = 그 안에 끝난 것도 더한다(선점 레인이 «방금 하얘진» 블록과 지난 범위를 그린다 — 마스터 #345)
-   */
-  listDelegations(pr: Principal, q: { active?: unknown; recent?: unknown } = {}): { delegations: Delegation[] } {
-    this.delegationGate(pr, 'view');
-    const active = q.active === true || q.active === '1' || q.active === 'true';
-    let recent = 0;
-    if (q.recent !== undefined && q.recent !== '') {
-      recent = Number(q.recent);
-      if (!Number.isInteger(recent) || recent < 0 || recent > 7 * 86400) throw new ApiError(400, 'bad_request', 'recent: seconds 0..604800');
-    }
-    const where = !active ? '' : recent ? "WHERE status NOT IN ('done','cancelled') OR finished_at >= ?" : "WHERE status NOT IN ('done','cancelled')";
-    const rows = this.db
-      .prepare(`SELECT * FROM delegations ${where} ORDER BY created_at DESC, id LIMIT 500`)
-      .all(...(active && recent ? [now() - recent * 1000] : [])) as Row[];
-    const byId = new Map<string, DelegationClaim[]>(rows.map((r) => [r.id as string, []]));
-    if (rows.length) {
-      const ids = rows.map((r) => r.id as string);
-      const cl = this.db.prepare(`SELECT * FROM claims WHERE delegation_id IN (${ids.map(() => '?').join(',')}) ORDER BY id`).all(...ids) as Row[];
-      for (const c of cl) byId.get(c.delegation_id)!.push(toClaim(c));
-    }
-    return { delegations: rows.map((r) => toDelegation(r, byId.get(r.id)!)) };
-  }
-
-  getDelegation(pr: Principal, id: string): { delegation: Delegation } {
-    this.delegationGate(pr, 'view');
-    return { delegation: this.delegationOut(id) };
-  }
-
-  // ───────────────────────── 대면 모드 (마이그레이션 16 · 마스터 #579·#581) ─────────────────────────
-  //   마스터 지시 하나 = 라운드. 턴은 서버가 기계적으로 넘긴다(완료 보고 → 다른 쪽에게 배달 — 요청→ 배달과 같은 길).
-  //   합의 = 수정 턴이 합의문을 안 바꿈 · 쟁점 = 상대가 직전 턴에 고친 줄을 다시 고침(src/face.ts).
-
-  private faceRow(id: string): Row | undefined {
-    return this.db.prepare('SELECT * FROM face_rounds WHERE id = ?').get(id) as Row | undefined;
-  }
-
-  private faceLatest(threadId: string): Row | undefined {
-    return this.db.prepare('SELECT * FROM face_rounds WHERE thread_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1').get(threadId) as Row | undefined;
-  }
-
-  private faceRevRows(roundId: string): Row[] {
-    return this.db.prepare('SELECT * FROM face_revs WHERE round_id = ? ORDER BY rev').all(roundId) as Row[];
-  }
-
-  private faceOrigins(round: Row): LineOrigin[] {
-    if (!round.rev) return [];
-    const r = this.db.prepare('SELECT origins FROM face_revs WHERE round_id = ? AND rev = ?').get(round.id, round.rev) as Row | undefined;
-    return r ? (JSON.parse(r.origins) as LineOrigin[]) : [];
-  }
-
-  private faceIssueRows(roundId: string, onlyOpen = false): Row[] {
-    return this.db.prepare(`SELECT * FROM face_issues WHERE round_id = ?${onlyOpen ? " AND state = 'open'" : ''} ORDER BY n`).all(roundId) as Row[];
-  }
-
-  private faceOther(round: Row, me: string): string {
-    return me === round.drafter ? round.reviewer : round.drafter;
-  }
-
-  /** 대면 턴을 하려면 두 쪽 다 이 스레드를 읽을 수 있어야 한다 */
-  private faceCheckMembers(threadId: string) {
-    if (!this.cfg.faceDrafter || !this.cfg.faceReviewer) throw new ApiError(409, 'face_not_configured', '대면 모드를 쓰려면 BRAINSTORM_FACE_DRAFTER·BRAINSTORM_FACE_REVIEWER 에 에이전트 id 를 적는다');
-    const miss = [this.cfg.faceDrafter, this.cfg.faceReviewer].filter((a) => !this.getParticipant(a) || !this.membership(threadId, a)?.can_read);
-    if (miss.length) throw new ApiError(409, 'face_members', `대면 모드는 ${this.cfg.faceDrafter}·${this.cfg.faceReviewer} 가 이 대화의 멤버여야 한다 — 없음: ${miss.join(', ')}`, undefined, { key: 'err.face_members.required', vars: { drafter: this.cfg.faceDrafter, reviewer: this.cfg.faceReviewer, missing: miss.join(', ') } });
-  }
-
-  private faceEmit(round: Row) {
-    this.emit({ notice: { t: 'face', thread_id: round.thread_id, round_id: round.id, state: round.state }, threadId: round.thread_id });
-  }
-
-  /**
-   * 마스터 글(대면 스레드 · 트랜잭션 안): 질문으로 멈춘 라운드면 답 → 물은 쪽이 이어 받는다 · 도는 라운드면 글만(맥락) ·
-   * 그 밖(라운드 없음·끝남·멈춤)이면 새 라운드 → 초안 쪽에게. 배달 받을 쪽을 돌려준다
-   */
-  private faceMasterPost(threadId: string, seq: number, t: number): { to: string | null; round: Row } {
-    const r = this.faceLatest(threadId);
-    if (r && r.state === 'question') {
-      this.db.prepare("UPDATE face_rounds SET state = 'running', next_agent = ?, turn_seq = ?, updated_at = ? WHERE id = ?").run(r.question_by, seq, t, r.id);
-      return { to: r.question_by as string, round: this.faceRow(r.id)! };
-    }
-    if (r && r.state === 'running') return { to: null, round: r };
-    const id = newId('face');
-    this.db
-      .prepare(
-        `INSERT INTO face_rounds(id, thread_id, instruction_seq, drafter, reviewer, state, next_agent, turn_seq, turn, base_turns, max_turns, rev, created_at, updated_at)
-         VALUES (?,?,?,?,?, 'running', ?, ?, 0, ?, ?, 0, ?, ?)`,
-      )
-      .run(id, threadId, seq, this.cfg.faceDrafter, this.cfg.faceReviewer, this.cfg.faceDrafter, seq, this.cfg.faceBaseTurns, this.cfg.faceMaxTurns, t, t);
-    return { to: this.cfg.faceDrafter, round: this.faceRow(id)! };
-  }
-
-  /** 이 실행이 대면 턴이면 그 라운드(도는 중 · 원인이 지금 차례 글 · 다음 차례가 나) */
-  private faceTurnRound(threadId: string, triggerSeq: number, agentId: string): Row | undefined {
-    const th = this.db.prepare('SELECT mode FROM threads WHERE id = ?').get(threadId) as Row | undefined;
-    if (th?.mode !== 'face') return undefined;
-    return this.db
-      .prepare("SELECT * FROM face_rounds WHERE thread_id = ? AND state = 'running' AND turn_seq = ? AND next_agent = ? ORDER BY created_at DESC LIMIT 1")
-      .get(threadId, triggerSeq, agentId) as Row | undefined;
-  }
-
-  /** 직전 에이전트 판(마스터 결정 판은 건너뜀) */
-  private faceLastAgentRev(roundId: string): Row | undefined {
-    const master = this.getMaster()?.id ?? '';
-    return this.db.prepare('SELECT * FROM face_revs WHERE round_id = ? AND author_id <> ? ORDER BY rev DESC LIMIT 1').get(roundId, master) as Row | undefined;
-  }
-
-  /** claim 에 싣는 대면 턴 정보 */
-  private faceForClaim(threadId: string, triggerSeq: number, me: string): ClaimFace | null {
-    const r = this.faceTurnRound(threadId, triggerSeq, me);
-    if (!r) return null;
-    const other = this.faceOther(r, me);
-    const origins = this.faceOrigins(r);
-    const lines = r.doc === null ? [] : docLines(r.doc);
-    const last = this.faceLastAgentRev(r.id);
-    const otherRev = last && last.author_id === other ? (last.rev as number) : null;
-    const open = this.faceIssueRows(r.id, true);
-    return {
-      round_id: r.id,
-      turn: r.turn + 1,
-      role: me === r.drafter ? 'drafter' : 'reviewer',
-      other: { id: other, name: this.nameOf(other) },
-      base_turns: r.base_turns,
-      max_turns: r.max_turns,
-      doc: r.doc ?? null,
-      rev: r.rev,
-      changed_by_other: otherRev === null ? [] : lines.filter((_, i) => origins[i]?.by === other && origins[i]?.rev === otherRev && !origins[i]?.draft),
-      open_issues: open.map((x) => ({ n: x.n as number, lines: lines.filter((_, i) => origins[i]?.issue === x.id) })),
-      resumed_question: r.question ?? null,
-    };
-  }
-
-  /** 대면 턴의 완료 보고: 답 글(해설) + 실행 완료 + 판·안건 + 다음 차례 배달 — 한 트랜잭션 */
-  private completeFace(pr: Principal, r: Row, round: Row, rawBody: string, sk: SourceKind, input: { usage?: unknown; runtime?: unknown; model?: unknown }) {
-    const me = pr.participant.id;
-    const other = this.faceOther(round, me);
-    const ans = parseFaceAnswer(rawBody);
-    const usage = input.usage === undefined ? null : JSON.stringify(input.usage).slice(0, 4000);
-    const t = now();
-    const duringCancel = r.cancel_requested_at != null;
-    const trig = this.db.prepare('SELECT hop FROM messages WHERE seq = ?').get(r.trigger_seq) as Row;
-    let deliveryTo: string | null = null;
-    const seq = this.db.transaction(() => {
-      const body = ans.kind === 'doc' ? ans.note || tr(this.lang(), 'srv.face.no_note', { rev: round.rev + 1 }) : rawBody;
-      const info = this.db
-        .prepare(
-          `INSERT INTO messages(id, thread_id, author_id, client_key, body, reply_to_seq, source_kind, input_mode, recipients, hop, trigger_run_id, handoff_to, pull_req, created_at)
-           VALUES (?,?,?,?,?,?,?, 'text', '[]', ?, ?, '[]', NULL, ?)`,
-        )
-        .run(newId('msg'), r.thread_id, me, `run:${r.id}`, body, r.trigger_seq, sk, trig.hop + 1, r.id, t);
-      const seq = Number(info.lastInsertRowid);
-      this.db
-        .prepare("UPDATE runs SET state = 'succeeded', ended_at = ?, finalized_at = ?, usage = ?, result_seq = ?, lease_expires_at = NULL WHERE id = ?")
-        .run(t, t, usage, seq, r.id);
-      this.ev(r.id, 'completed', me, { result_seq: seq, during_cancel: duringCancel }, t);
-      this.ev(r.id, 'finalized', 'server', duringCancel ? { state: 'succeeded', completed_first: true } : { state: 'succeeded' }, t);
-      if (duringCancel) this.auditCancelFinal(r, 'succeeded', 'completed_first', t, me);
-      const str = (v: unknown) => (typeof v === 'string' && v.trim() ? v.slice(0, 200) : null);
-      this.db.prepare('UPDATE agent_sessions SET runtime = COALESCE(?, runtime), actual_model = COALESCE(?, actual_model) WHERE id = ?').run(str(input.runtime), str(input.model), r.session_id);
-
-      if (ans.kind === 'question') {
-        this.db
-          .prepare("UPDATE face_rounds SET state = 'question', question = ?, question_by = ?, question_seq = ?, next_agent = ?, updated_at = ? WHERE id = ?")
-          .run(ans.question, me, seq, me, t, round.id);
-        this.ev(r.id, 'face_question', 'server', { round_id: round.id, turn: round.turn + 1 }, t);
-        return seq;
-      }
-      if (ans.kind === 'none') {
-        this.db.prepare("UPDATE face_rounds SET state = 'stopped', stop_reason = 'no_doc', next_agent = ?, updated_at = ? WHERE id = ?").run(me, t, round.id);
-        this.ev(r.id, 'face_no_doc', 'server', { round_id: round.id, turn: round.turn + 1 }, t);
-        return seq;
-      }
-      const turn = (round.turn as number) + 1;
-      const rev = (round.rev as number) + 1;
-      const revs = this.faceRevRows(round.id);
-      const last = this.faceLastAgentRev(round.id);
-      const otherRev = last && last.author_id === other ? (last.rev as number) : null;
-      const myPast = new Set<string>();
-      for (const row of revs) {
-        const o = JSON.parse(row.origins) as LineOrigin[];
-        docLines(row.doc).forEach((l, i) => o[i]?.by === me && l.trim() && myPast.add(l));
-      }
-      const open = new Set(this.faceIssueRows(round.id, true).map((x) => x.id as string));
-      const res = applyTurn({
-        prevDoc: round.rev ? (round.doc as string) : null,
-        prevOrigins: this.faceOrigins(round),
-        newDoc: ans.doc,
-        me,
-        other,
-        rev,
-        turn,
-        otherPrevRev: otherRev,
-        otherSeq: otherRev !== null ? ((last!.message_seq as number) ?? null) : null,
-        mySeq: seq,
-        openIssues: open,
-        myPastLines: myPast,
-        limitTurn: turn >= round.max_turns,
-        newIssueId: () => newId('fi'),
-      });
-      this.db
-        .prepare('INSERT INTO face_revs(round_id, rev, turn, author_id, run_id, message_seq, doc, origins, changed, created_at) VALUES (?,?,?,?,?,?,?,?,?,?)')
-        .run(round.id, rev, turn, me, r.id, seq, ans.doc, JSON.stringify(res.origins), res.changed, t);
-      let n = ((this.db.prepare('SELECT MAX(n) AS n FROM face_issues WHERE round_id = ?').get(round.id) as Row).n as number | null) ?? 0;
-      for (const op of res.issueOps) {
-        if (op.op === 'new')
-          this.db
-            .prepare("INSERT INTO face_issues(id, round_id, n, kind, versions, state, created_at) VALUES (?,?,?,?,?, 'open', ?)")
-            .run(op.id, round.id, ++n, op.kind, JSON.stringify(op.versions), t);
-        else {
-          const row = this.db.prepare('SELECT versions FROM face_issues WHERE id = ?').get(op.id) as Row;
-          this.db.prepare('UPDATE face_issues SET versions = ? WHERE id = ?').run(JSON.stringify([...JSON.parse(row.versions), op.version]), op.id);
-        }
-      }
-      let state: FaceState = 'running';
-      let stopReason: string | null = null;
-      if (turn >= 2 && res.changed === 0) state = 'agreed';
-      else if (turn >= round.max_turns) state = 'limit';
-      else if (this.requireThread(r.thread_id).invoke_paused) {
-        state = 'stopped';
-        stopReason = 'invoke_paused';
-      } else deliveryTo = other;
-      const ended = state === 'agreed' || state === 'limit';
-      this.db
-        .prepare(
-          `UPDATE face_rounds SET state = ?, stop_reason = ?, turn = ?, rev = ?, doc = ?, next_agent = ?, turn_seq = ?, question = NULL, question_by = NULL,
-           ended_at = ?, updated_at = ? WHERE id = ?`,
-        )
-        .run(state, stopReason, turn, rev, ans.doc, ended ? null : other, ended ? null : seq, ended ? t : null, t, round.id);
-      if (deliveryTo) {
-        const did = newId('dlv');
-        this.db
-          .prepare(`INSERT INTO deliveries(id, message_seq, thread_id, recipient_id, status, attempts, created_at, updated_at) VALUES (?,?,?,?, 'pending', 0, ?, ?)`)
-          .run(did, seq, r.thread_id, deliveryTo, t, t);
-        this.ev(r.id, 'face_next', 'server', { round_id: round.id, to: deliveryTo, delivery_id: did }, t);
-      }
-      this.ev(r.id, 'face_turn', 'server', { round_id: round.id, turn, rev, changed: res.changed, issues: res.issueOps.length, state }, t);
-      return seq;
-    })();
-    this.emit({ notice: { t: 'msg', thread_id: r.thread_id, seq }, threadId: r.thread_id });
-    this.emit({ notice: { t: 'run', thread_id: r.thread_id, run_id: r.id, state: 'succeeded' }, threadId: r.thread_id });
-    this.faceEmit(this.faceRow(round.id)!);
-    if (deliveryTo) this.emit({ notice: { t: 'delivery', thread_id: r.thread_id }, threadId: r.thread_id, only: deliveryTo });
-    return { run: this.toRunOut(this.runRow(r.id)!), message: toMessage(this.db.prepare('SELECT * FROM messages WHERE seq = ?').get(seq) as Row), duplicate: false };
-  }
-
-  /** 대면 턴 실행이 실패하면 라운드는 멈춘다(«다시 돌리기»로 같은 쪽이 같은 턴을) */
-  private faceOnFail(r: Row, t: number) {
-    const round = this.faceTurnRound(r.thread_id, r.trigger_seq, r.agent_id);
-    if (!round) return;
-    this.db.prepare("UPDATE face_rounds SET state = 'stopped', stop_reason = 'run_failed', updated_at = ? WHERE id = ?").run(t, round.id);
-    this.faceEmit(this.faceRow(round.id)!);
-  }
-
-  /** 도는 라운드인데 그 턴의 배달·실행이 없다(취소·미확인으로 끝남) — 화면에 «다시 돌리기» */
-  private faceStalled(round: Row): boolean {
-    if (round.state !== 'running' || round.turn_seq == null || !round.next_agent) return false;
-    const d = this.db
-      .prepare("SELECT 1 FROM deliveries WHERE message_seq = ? AND recipient_id = ? AND status IN ('pending','leased')")
-      .get(round.turn_seq, round.next_agent);
-    const run = this.db
-      .prepare("SELECT state FROM runs WHERE trigger_seq = ? AND agent_id = ? ORDER BY created_at DESC LIMIT 1")
-      .get(round.turn_seq, round.next_agent) as Row | undefined;
-    return !d && (!run || (run.state !== 'queued' && run.state !== 'running' && run.state !== 'succeeded'));
-  }
-
-  /** 지금 차례의 배달을 거두고 도는 실행에 중단을 요청한다(멈추기·모드 끔) */
-  private faceWithdraw(round: Row, who: string, t: number, actor: AuditActor): string[] {
-    if (!round.turn_seq || !round.next_agent) return [];
-    this.db
-      .prepare("UPDATE deliveries SET status = 'cancelled', last_error = 'face_stop', lease_token_hash = NULL, updated_at = ? WHERE message_seq = ? AND recipient_id = ? AND status IN ('pending','leased')")
-      .run(t, round.turn_seq, round.next_agent);
-    const out: string[] = [];
-    for (const r of this.db.prepare("SELECT * FROM runs WHERE trigger_seq = ? AND agent_id = ? AND state IN ('queued','running')").all(round.turn_seq, round.next_agent) as Row[]) {
-      this.requestCancel(r, who, t, actor);
-      out.push(r.id);
-    }
-    return out;
-  }
-
-  private faceHalt(pr: Principal, round: Row, reason: 'master_stop' | 'mode_off', t: number): string[] {
-    if (round.state !== 'running' && round.state !== 'question') return [];
-    const runs = this.faceWithdraw(round, pr.participant.id, t, this.actorOf(pr));
-    this.db.prepare("UPDATE face_rounds SET state = 'stopped', stop_reason = ?, updated_at = ? WHERE id = ?").run(reason, t, round.id);
-    return runs;
-  }
-
-  /** 대면 모드 켜기·끄기(마스터만). 끄면 보통 대화 — 도는 라운드는 멈춘다 */
-  setThreadMode(pr: Principal, threadId: string, mode: unknown): { ok: true; changed: boolean; thread: Thread } {
-    this.requireMaster(pr, 'thread.mode', { target_type: 'thread', target_id: threadId, thread_id: threadId });
-    const th = this.requireThread(threadId);
-    if (mode !== 'chat' && mode !== 'face') throw new ApiError(400, 'bad_mode', "mode: 'chat' | 'face'");
-    if (th.kind === 'room') throw new ApiError(409, 'room_locked', '메인 채팅방은 대면 모드가 없다', undefined, { key: 'err.room_locked.face' });
-    if (th.deleted_at) throw new ApiError(409, 'thread_deleted');
-    if (mode === 'face') this.faceCheckMembers(threadId);
-    const t = now();
-    const before = th.mode === 'face' ? 'face' : 'chat';
-    let halted: Row | undefined;
-    let runs: string[] = [];
-    this.db.transaction(() => {
-      this.db.prepare('UPDATE threads SET mode = ?, updated_at = ? WHERE id = ?').run(mode, t, threadId);
-      if (mode === 'chat') {
-        const r = this.faceLatest(threadId);
-        if (r && (r.state === 'running' || r.state === 'question')) {
-          runs = this.faceHalt(pr, r, 'mode_off', t);
-          halted = r;
-        }
-      }
-      this.audit({
-        actor: this.actorOf(pr), action: 'thread.mode', target_type: 'thread', target_id: threadId, thread_id: threadId,
-        result: before === mode ? 'noop' : 'ok', reason: before === mode ? 'unchanged' : null,
-        before: { mode: before }, after: { mode, ...(halted ? { stopped_round: halted.id } : {}) },
-      });
-    })();
-    for (const id of runs) this.emit({ notice: { t: 'run', thread_id: threadId, run_id: id, state: 'running' }, threadId });
-    if (halted) this.faceEmit(this.faceRow(halted.id)!);
-    this.emit({ notice: { t: 'thread', thread_id: threadId }, threadId });
-    return { ok: true, changed: before !== mode, thread: this.getThread(pr, threadId).thread };
-  }
-
-  private faceOut(r: Row): FaceRound {
-    return {
-      id: r.id, thread_id: r.thread_id, instruction_seq: r.instruction_seq, drafter: r.drafter, reviewer: r.reviewer, state: r.state,
-      next_agent: r.next_agent ?? null, turn_seq: r.turn_seq ?? null, turn: r.turn, base_turns: r.base_turns, max_turns: r.max_turns,
-      doc: r.doc ?? null, rev: r.rev, stop_reason: r.stop_reason ?? null, question: r.question ?? null, question_by: r.question_by ?? null,
-      question_seq: r.question_seq ?? null, verdict: r.verdict ?? null, verdict_note: r.verdict_note ?? null, verdict_by: r.verdict_by ?? null,
-      verdict_at: r.verdict_at ?? null, created_at: r.created_at, updated_at: r.updated_at, ended_at: r.ended_at ?? null,
-    };
-  }
-
-  private faceIssueOut(x: Row): FaceIssue {
-    return {
-      id: x.id, round_id: x.round_id, n: x.n, kind: x.kind, versions: JSON.parse(x.versions), state: x.state,
-      decision: x.decision ?? null, decided_by: x.decided_by ?? null, decided_at: x.decided_at ?? null, created_at: x.created_at,
-    };
-  }
-
-  /** 대면 보기: 모드 · 설정 · 라운드(기본 최신 · ?round=) · 판들 · 안건 · 지난 라운드 목록 · 멈춰 선 턴인지 */
-  getFace(pr: Principal, threadId: string, roundId?: string) {
-    const th = this.requireRead(pr, threadId, 'thread.read', true);
-    const r = roundId ? this.faceRow(roundId) : this.faceLatest(threadId);
-    if (roundId && (!r || r.thread_id !== threadId)) throw new ApiError(404, 'no_round');
-    return {
-      mode: (th.mode === 'face' ? 'face' : 'chat') as ThreadMode,
-      config: { drafter: this.cfg.faceDrafter, reviewer: this.cfg.faceReviewer, base_turns: this.cfg.faceBaseTurns, max_turns: this.cfg.faceMaxTurns },
-      round: r ? this.faceOut(r) : null,
-      stalled: r ? this.faceStalled(r) : false,
-      revs: r
-        ? this.faceRevRows(r.id).map(
-            (x) => ({ rev: x.rev, turn: x.turn, author_id: x.author_id, run_id: x.run_id ?? null, message_seq: x.message_seq ?? null, doc: x.doc, origins: JSON.parse(x.origins), changed: x.changed, created_at: x.created_at }) satisfies FaceRev,
-          )
-        : [],
-      issues: r ? this.faceIssueRows(r.id).map((x) => this.faceIssueOut(x)) : [],
-      rounds: (this.db.prepare('SELECT id, state, instruction_seq, turn, created_at FROM face_rounds WHERE thread_id = ? ORDER BY created_at DESC LIMIT 50').all(threadId) as Row[]).map((x) => ({ ...x })),
-    };
-  }
-
-  private faceRoundFor(pr: Principal, roundId: string, action: string): Row {
-    const r = this.faceRow(roundId);
-    this.requireMaster(pr, action, { target_type: 'face_round', target_id: roundId, thread_id: r?.thread_id ?? null });
-    if (!r) throw new ApiError(404, 'no_round');
-    this.requireRead(pr, r.thread_id, action);
-    return r;
-  }
-
-  /** 안건 결정(마스터만): 한 판을 고르거나(pick) 직접 쓴다(text) → 합의문의 그 줄을 갈아 끼운 새 판 */
-  decideIssue(pr: Principal, roundId: string, issueId: string, input: { pick?: unknown; text?: unknown } = {}) {
-    const r = this.faceRoundFor(pr, roundId, 'face.decide');
-    if (r.state === 'approved' || r.state === 'rejected') throw new ApiError(409, 'round_closed');
-    const x = this.db.prepare('SELECT * FROM face_issues WHERE id = ? AND round_id = ?').get(issueId, roundId) as Row | undefined;
-    if (!x) throw new ApiError(404, 'no_issue');
-    if (x.state !== 'open') throw new ApiError(409, 'already_decided');
-    const versions = JSON.parse(x.versions) as FaceIssue['versions'];
-    let text: string;
-    if (input.pick !== undefined && input.pick !== null) {
-      const k = optInt(input.pick, 'pick');
-      if (k === null || k < 0 || k >= versions.length) throw new ApiError(400, 'bad_pick');
-      text = versions[k].text;
-    } else if (typeof input.text === 'string') text = input.text.slice(0, this.cfg.bodyMaxChars);
-    else throw new ApiError(400, 'bad_request', 'pick 또는 text', undefined, { key: 'err.bad_request.pick_or_text' });
-    const t = now();
-    const me = pr.participant.id;
-    this.db.transaction(() => {
-      const rev = (r.rev as number) + 1;
-      const prev = (r.doc as string | null) ?? '';
-      const out = replaceIssueLines(prev, this.faceOrigins(r), issueId, text, me, rev);
-      const changed = diffLines(docLines(prev), docLines(out.doc)).reduce((s, h) => s + (h.aEnd - h.aStart) + (h.bEnd - h.bStart), 0);
-      this.db
-        .prepare('INSERT INTO face_revs(round_id, rev, turn, author_id, run_id, message_seq, doc, origins, changed, created_at) VALUES (?,?,?,?,NULL,NULL,?,?,?,?)')
-        .run(roundId, rev, r.turn, me, out.doc, JSON.stringify(out.origins), changed, t);
-      this.db.prepare("UPDATE face_issues SET state = 'decided', decision = ?, decided_by = ?, decided_at = ? WHERE id = ?").run(text, me, t, issueId);
-      this.db.prepare('UPDATE face_rounds SET doc = ?, rev = ?, updated_at = ? WHERE id = ?').run(out.doc, rev, t, roundId);
-      this.audit({
-        actor: this.actorOf(pr), action: 'face.decide', target_type: 'face_issue', target_id: issueId, thread_id: r.thread_id, result: 'ok',
-        after: { round_id: roundId, n: x.n, pick: input.pick ?? null, rev },
-      });
-    })();
-    const nr = this.faceRow(roundId)!;
-    this.faceEmit(nr);
-    return { ok: true as const, round: this.faceOut(nr), issue: this.faceIssueOut(this.db.prepare('SELECT * FROM face_issues WHERE id = ?').get(issueId) as Row) };
-  }
-
-  /** 결론 판정(마스터만): 합의·상한에서 승인(열린 안건 0 · «정산:» 줄) / 반려 */
-  faceVerdict(pr: Principal, roundId: string, input: { verdict?: unknown; note?: unknown } = {}) {
-    const r = this.faceRoundFor(pr, roundId, 'face.verdict');
-    if (input.verdict !== 'approve' && input.verdict !== 'reject') throw new ApiError(400, 'bad_verdict', "verdict: 'approve' | 'reject'");
-    if (r.state !== 'agreed' && r.state !== 'limit') throw new ApiError(409, 'bad_state', `round is ${r.state}`);
-    const open = this.faceIssueRows(roundId, true).length;
-    if (input.verdict === 'approve' && open) throw new ApiError(409, 'issues_open', `열린 안건 ${open}개 — 먼저 정한다`, undefined, { key: 'err.issues_open', vars: { n: open } });
-    const note = typeof input.note === 'string' && input.note.trim() ? input.note.trim().slice(0, 2000) : null;
-    const t = now();
-    const state: FaceState = input.verdict === 'approve' ? 'approved' : 'rejected';
-    this.db.transaction(() => {
-      this.db
-        .prepare('UPDATE face_rounds SET state = ?, verdict = ?, verdict_note = ?, verdict_by = ?, verdict_at = ?, updated_at = ? WHERE id = ?')
-        .run(state, input.verdict, note, pr.participant.id, t, t, roundId);
-      this.audit({
-        actor: this.actorOf(pr), action: 'face.verdict', target_type: 'face_round', target_id: roundId, thread_id: r.thread_id, result: 'ok',
-        reason: String(input.verdict), before: { state: r.state }, after: { state, rev: r.rev },
-      });
-    })();
-    const nr = this.faceRow(roundId)!;
-    this.faceEmit(nr);
-    return { ok: true as const, round: this.faceOut(nr) };
-  }
-
-  /** 멈추기(마스터만): 지금 차례 배달을 거두고 도는 실행에 중단 요청 → stopped(master_stop) */
-  faceStop(pr: Principal, roundId: string) {
-    const r = this.faceRoundFor(pr, roundId, 'face.stop');
-    if (r.state !== 'running' && r.state !== 'question') throw new ApiError(409, 'bad_state', `round is ${r.state}`);
-    const t = now();
-    let runs: string[] = [];
-    this.db.transaction(() => {
-      runs = this.faceHalt(pr, r, 'master_stop', t);
-      this.audit({ actor: this.actorOf(pr), action: 'face.stop', target_type: 'face_round', target_id: roundId, thread_id: r.thread_id, result: 'ok', before: { state: r.state }, after: { state: 'stopped', cancel_requested_runs: runs.length } });
-    })();
-    for (const id of runs) this.emit({ notice: { t: 'run', thread_id: r.thread_id, run_id: id, state: 'running' }, threadId: r.thread_id });
-    const nr = this.faceRow(roundId)!;
-    this.faceEmit(nr);
-    return { ok: true as const, round: this.faceOut(nr), cancel_requested_runs: runs };
-  }
-
-  /**
-   * 다시 돌리기(마스터만): 멈춘 라운드(또는 배달·실행 없이 선 턴)를 같은 쪽의 같은 턴부터. 실행은 (원인, 수신자)마다 한 번이라
-   * 마스터 글 하나(«대면 다시 돌리기») 를 새 원인으로 만들고 그 글을 배달한다
-   */
-  faceRetry(pr: Principal, roundId: string) {
-    const r = this.faceRoundFor(pr, roundId, 'face.retry');
-    const th = this.requireThread(r.thread_id);
-    if (th.mode !== 'face') throw new ApiError(409, 'not_face', '대면 모드가 꺼져 있다', undefined, { key: 'err.not_face' });
-    if (th.status !== 'open' || th.deleted_at) throw new ApiError(409, 'thread_closed');
-    if (!(r.state === 'stopped' || this.faceStalled(r))) throw new ApiError(409, 'bad_state', `round is ${r.state}`);
-    if (th.invoke_paused) throw new ApiError(409, 'invoke_paused', '새 호출 금지 중', undefined, { key: 'err.invoke_paused.paused' });
-    const next = (r.next_agent as string | null) ?? (r.drafter as string);
-    if (!this.membership(r.thread_id, next)?.can_read) throw new ApiError(409, 'face_members', `${next} 가 이 대화의 멤버가 아니다`, undefined, { key: 'err.face_members.next', vars: { agent: next } });
-    const t = now();
-    const me = pr.participant.id;
-    const seq = this.db.transaction(() => {
-      const info = this.db
-        .prepare(
-          `INSERT INTO messages(id, thread_id, author_id, client_key, body, source_kind, input_mode, recipients, hop, created_at)
-           VALUES (?,?,?,?,?, 'instruction', 'text', ?, 0, ?)`,
-        )
-        .run(newId('msg'), r.thread_id, me, `face-retry:${roundId}:${t}`, tr(this.lang(), 'srv.face.retry', { turn: (r.turn as number) + 1, name: this.nameOf(next) }), JSON.stringify([next]), t);
-      const seq = Number(info.lastInsertRowid);
-      this.db
-        .prepare(`INSERT INTO deliveries(id, message_seq, thread_id, recipient_id, status, attempts, created_at, updated_at) VALUES (?,?,?,?, 'pending', 0, ?, ?)`)
-        .run(newId('dlv'), seq, r.thread_id, next, t, t);
-      this.db.prepare("UPDATE face_rounds SET state = 'running', stop_reason = NULL, next_agent = ?, turn_seq = ?, updated_at = ? WHERE id = ?").run(next, seq, t, roundId);
-      this.db.prepare('UPDATE threads SET updated_at = ? WHERE id = ?').run(t, r.thread_id);
-      this.audit({ actor: this.actorOf(pr), action: 'face.retry', target_type: 'face_round', target_id: roundId, thread_id: r.thread_id, result: 'ok', before: { state: r.state, stop_reason: r.stop_reason ?? null }, after: { state: 'running', to: next, seq } });
-      return seq;
-    })();
-    this.emit({ notice: { t: 'msg', thread_id: r.thread_id, seq }, threadId: r.thread_id });
-    this.emit({ notice: { t: 'delivery', thread_id: r.thread_id }, threadId: r.thread_id, only: next });
-    const nr = this.faceRow(roundId)!;
-    this.faceEmit(nr);
-    return { ok: true as const, round: this.faceOut(nr), seq };
   }
 
   serverSeq(): number {

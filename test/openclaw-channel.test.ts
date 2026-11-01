@@ -82,7 +82,7 @@ describe('OpenClaw 채널: 작업자 (가짜 턴)', () => {
   let ctx: Ctx;
   const quiet = { info() {}, warn() {}, error() {} };
   before(async () => {
-    ctx = await setup();
+    ctx = await setup({ deliveryLeaseMs: 1000, runLeaseMs: 3000 }); // 임대 만료를 기다리는 시험이 있다
   });
   after(async () => ctx.close());
 

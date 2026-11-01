@@ -385,8 +385,10 @@ export interface ClaimCarry {
   from_generation: number;
   reason: string;
   thread_title: string;
-  /** baalda 의 이 스레드 원문 노트(사서 sync-threads 가 붙인다) */
+  /** 이 스레드의 원문 사본 위치(외부 내보내기가 쓰는 이름 규칙) */
   thread_note: string;
+  /** 옛 대화를 읽는 길 안내(설정 BRAINSTORM_CARRY_HINT · `{note}` 자리에 thread_note) — 없으면 사전의 기본 문구 */
+  older_hint?: string;
   /** 원문으로 안 실리는 옛 글 수 */
   older_messages: number;
   base_seq: number | null;
@@ -398,7 +400,7 @@ export interface ClaimCarry {
 export function renderCarry(c: ClaimCarry, lang?: string | null): string {
   const lines = [
     t(lang, 'prompt.carry_head', { gen: c.from_generation, reason: c.reason }),
-    t(lang, 'prompt.carry_older', { n: c.older_messages, note: c.thread_note }),
+    t(lang, 'prompt.carry_older', { n: c.older_messages, how: c.older_hint ? c.older_hint.replaceAll('{note}', c.thread_note) : t(lang, 'prompt.carry_older_how', { note: c.thread_note }) }),
   ];
   if (c.summary) lines.push(`${t(lang, 'prompt.carry_summary', { seq: c.summary.seq, name: c.summary.author_name })}\n${c.summary.body}`);
   else lines.push(t(lang, 'prompt.carry_no_summary'));
@@ -481,7 +483,7 @@ export interface RunCompletion {
 export type DelegationStatus = 'queued' | 'running' | 'blocked' | 'done' | 'cancelled';
 export const DELEGATION_STATUSES: DelegationStatus[] = ['queued', 'running', 'blocked', 'done', 'cancelled'];
 export const DELEGATION_CLOSED: DelegationStatus[] = ['done', 'cancelled'];
-/** 버전 자리(README «버전 · 태그 · push») — a 메이저 · b 마이너 · c 패치 */
+/** 버전 자리 — a 메이저 · b 마이너 · c 패치 */
 export type VersionSlot = 'a' | 'b' | 'c';
 export const VERSION_SLOTS: VersionSlot[] = ['a', 'b', 'c'];
 /** path = 저장소 안 경로 접두(폴더는 '/'로 끝, 'src/store' 는 src/store.ts 까지 · '*' = 저장소 전체) · resource = (repo, scope) 정확히 같을 때만 겹침 */

@@ -15,7 +15,7 @@ import WS from 'ws';
 import { setup, MASTER_PASS } from '../dist/test/helpers.js';
 
 const ACK_MS = 900; // 시험용 무응답 제한(운영 기본 30초)
-const ctx = await setup({ cancelAckMs: ACK_MS, faceDrafter: 'alpha', faceReviewer: 'beta' });
+const ctx = await setup({ cancelAckMs: ACK_MS, faceDrafter: 'alpha', faceReviewer: 'beta', modules: ['face', 'delegations', 'requests', 'merge'] });
 const base = ctx.base;
 const errors = [];
 const html = fs.readFileSync(new URL('../public/index.html', import.meta.url), 'utf8').replace(/<script[^>]*><\/script>/, '');
@@ -1102,7 +1102,7 @@ $('body').value = '';
 // ── 요청 창구(마스터 #352): 출처 «요청» 배지 · «ALPHA → BETA» · 보류 → 머리 «보류된 요청 N» · 보조 패널 목록·사유·«확인함»
 {
   const st = ctx.app.store;
-  st.setRequestPair({ participant: st.getMaster(), via: 'cookie', scopes: ['admin'], actor: { id: 'cli:root', kind: 'cli' } }, 'alpha', 'beta', true);
+  st.requests.setRequestPair({ participant: st.getMaster(), via: 'cookie', scopes: ['admin'], actor: { id: 'cli:root', kind: 'cli' } }, 'alpha', 'beta', true);
   const rtok = st.createToken('beta', { label: 'rq-ui' }).token;
   const RB = (p, b) => fetch(base + p, { method: 'POST', headers: { Authorization: 'Bearer ' + rtok, 'Content-Type': 'application/json' }, body: JSON.stringify(b ?? {}) }).then((r) => r.json());
   /** 그 스레드의 전달이 나올 때까지 앞 단계가 남긴 것은 마저 끝낸다 */

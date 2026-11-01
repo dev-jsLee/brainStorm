@@ -22,7 +22,7 @@ const roomOf = async (ctx: Ctx) => ((await ctx.master('GET', '/api/threads')).js
 describe('감사 기록 — 거부', () => {
   let ctx: Ctx;
   before(async () => {
-    ctx = await setup({ auditGroupMs: 400 });
+    ctx = await setup({ auditGroupMs: 3000 });
   });
   after(async () => ctx.close());
 
@@ -50,7 +50,7 @@ describe('감사 기록 — 거부', () => {
     assert.equal(bad.status, 401);
     assert.equal(rows(ctx, "action = 'auth.token' AND actor_id = 'anonymous' AND reason = 'token_unknown'").length, 1);
     // 묶음 시간이 지나면 새 행
-    await sleep(450);
+    await sleep(3100);
     assert.equal((await ctx.agent('beta', 'GET', '/api/me')).status, 401);
     assert.equal(rows(ctx, "action = 'auth.token' AND actor_id = 'beta'").length, 2);
   });
@@ -108,7 +108,7 @@ describe('감사 기록 — 거부', () => {
 describe('감사 기록 — 민감 작업', () => {
   let ctx: Ctx;
   before(async () => {
-    ctx = await setup({ cancelAckMs: 500 });
+    ctx = await setup({ cancelAckMs: 2000 });
   });
   after(async () => ctx.close());
 

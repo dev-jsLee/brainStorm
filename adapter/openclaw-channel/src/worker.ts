@@ -94,6 +94,7 @@ interface Claim {
   carry?: ClaimCarry | null;
   /** 네 요청이 보류됐다는 알림(그 스레드에서 처음 불리는 실행 한 번만) — 옛 서버는 안 보낸다 */
   hold_notices?: ClaimHoldNotice[] | null;
+  request_rule?: boolean;
   face?: ClaimFace | null;
   /** 규약·안내 언어(마스터 #823) — 옛 서버는 안 보낸다(ko) */
   lang?: string;
@@ -331,6 +332,7 @@ export class BrainstormWorker {
         pulled: claim.pulled ?? null,
         carry: claim.carry ?? null,
         holdNotices: claim.hold_notices ?? null,
+        requestRule: claim.request_rule ?? null,
         face: claim.face ?? null,
         lang: claim.lang ?? null,
       });

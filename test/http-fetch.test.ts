@@ -1,4 +1,4 @@
-// LLM 요청용 httpFetch — 내장 fetch 의 300초 무응답 제한 없이 표준 Response 를 돌려준다(2026-10-13 메티 `terminated` 실패).
+// LLM 요청용 httpFetch — 내장 fetch 의 300초 무응답 제한 없이 표준 Response 를 돌려준다(2026-10-13 에이전트M `terminated` 실패).
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';

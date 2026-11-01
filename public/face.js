@@ -1,20 +1,22 @@
 // brainStorm 대면 모드(2026-10-19 마스터 #579·#581 · 마이그레이션 16) — 대화 화면의 세 열:
-//   왼쪽 초안 쪽(백구) 글 · 오른쪽 검토 쪽(비전) 글 · 가운데 위 합의문(판 번호 · 턴 k/4(→6) · 바뀐 줄 강조 · ⚑ 안건) · 가운데 안건·질문·결론 카드.
-//   작성란은 그대로 가운데 아래 — 받는 이 칩 없음(서버가 정한다: 새 지시는 초안 쪽부터 · 질문 답은 물은 쪽). ≤760px 은 탭(합의문 · 백구 · 비전).
+//   왼쪽 초안 쪽 글 · 오른쪽 검토 쪽 글 · 가운데 위 합의문(판 번호 · 턴 k/4(→6) · 바뀐 줄 강조 · ⚑ 안건) · 가운데 안건·질문·결론 카드.
+//   작성란은 그대로 가운데 아래 — 받는 이 칩 없음(서버가 정한다: 새 지시는 초안 쪽부터 · 질문 답은 물은 쪽). ≤760px 은 탭(합의문 · 초안 쪽 · 검토 쪽).
 // app.js 보다 먼저 읽히지만 함수만 정의한다. app.js 의 전역($·S·el·api·pname·fillBody…)을 쓴다.
 'use strict';
 
 const FACE_STATE = { running: t('face.st_running'), question: t('face.st_question'), agreed: t('face.st_agreed'), limit: t('face.st_limit'), stopped: t('face.st_stopped'), approved: t('face.st_approved'), rejected: t('face.st_rejected') };
 const FACE_STOP = { no_doc: t('face.stop_no_doc', { word: t('proto.agreement') }), run_failed: t('face.stop_run_failed'), master_stop: t('face.stop_master'), mode_off: t('face.stop_mode_off'), invoke_paused: t('face.stop_paused') };
 
-const faceActive = () => S.detail?.thread?.mode === 'face' && S.detail.thread.kind !== 'room';
+/** 대면 모듈이 켜져 있나(/api/me.modules · docs/MODULES.md) — 꺼지면 단추도 세 열도 없다 */
+const faceOn = () => !!S.modules?.has('face');
+const faceActive = () => faceOn() && S.detail?.thread?.mode === 'face' && S.detail.thread.kind !== 'room';
 
 /** 대화 머리의 «대면 모드» 단추(마스터 · 스레드만) */
 function syncFaceToggle() {
   const b = $('t-face');
   if (!b) return;
   const th = S.detail?.thread;
-  b.hidden = !th || th.kind === 'room' || !S.me?.is_master;
+  b.hidden = !faceOn() || !th || th.kind === 'room' || !S.me?.is_master;
   const on = faceActive();
   b.textContent = on ? t('face.toggle_off') : t('face.mode');
   b.setAttribute('aria-pressed', on ? 'true' : 'false');

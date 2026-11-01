@@ -1,6 +1,6 @@
 // LLM 요청용 fetch — Node 내장 fetch(undici)는 헤더·본문 사이 무응답이 300초(headersTimeout·bodyTimeout 기본값)를 넘으면
 // `terminated` 로 끊는다. OpenClaw 게이트웨이처럼 에이전트 턴이 끝날 때까지 한 바이트도 안 보내는 서버에서는
-// 5분 넘게 생각하는 턴이 전부 실패한다(2026-10-13 메티 실패 2건 · 301 s·315 s). 여기서는 node:http 로 직접 보내고
+// 5분 넘게 생각하는 턴이 전부 실패한다(2026-10-13 실측 실패 2건 · 301 s·315 s). 여기서는 node:http 로 직접 보내고
 // 시간 상한은 부르는 쪽 AbortSignal(OPENAI_TIMEOUT_MS)만 정한다. 돌려주는 것은 표준 Response 다.
 import http from 'node:http';
 import https from 'node:https';

@@ -84,6 +84,7 @@ npm run test:ui   # UI 스모크: jsdom 으로 public/*.js 를 실제 서버에 
 | 매일 백업 | `brainstorm-backup.timer` (03:40) |
 | 에이전트 어댑터 템플릿(켜지 않는다) | `brainstorm-agent@.service`(OpenAI 호환), 설정 자리 `/etc/brainstorm/agents/` |
 | 명령 | `/usr/local/bin/brainstorm-{admin,backup,restore}` |
+| node 경로 | 유닛·`brainstorm-admin` 에 `command -v node` 값을 넣어 깐다 — Node 를 옮기면 다시 돌린다(홈 아래 node 는 거절 · 서비스가 `ProtectHome` 이라 못 읽음) |
 | 첫 설치 때만: 마스터 등록 + 초기 패스프레이즈 | `/root/brainstorm-initial-passphrase.txt` (600) |
 
 확인: `curl http://127.0.0.1:8080/healthz` → `{"ok":true,…}`
@@ -96,6 +97,7 @@ npm run test:ui   # UI 스모크: jsdom 으로 public/*.js 를 실제 서버에 
 | `BRAINSTORM_ALLOW_EXTERNAL` | `1` 이어야 루프백 밖 주소를 듣는다(기본 꺼짐) |
 | `BRAINSTORM_ORIGINS` | 쿠키 인증 상태 변경 요청·WebSocket 이 받는 Origin. **브라우저로 여는 주소(LAN IP·도메인)를 반드시 더한다** |
 | `BRAINSTORM_SECURE_COOKIE` | `auto` = HTTPS 요청일 때만 Secure |
+| `BRAINSTORM_MODULES` | 켤 선택 모듈(쉼표 · `all` · 비면 core 만) — 대면 `face` · 위임 대장 `delegations` · 요청 `requests` · 상위로 합치기 `merge`(`docs/MODULES.md`) |
 | `BRAINSTORM_FACE_DRAFTER` · `BRAINSTORM_FACE_REVIEWER` | 대면 모드의 초안·검토 에이전트 id. 비우면 대면 모드를 못 켠다 |
 | 그 밖 | 크기 제한·lease·취소 확인 대기·호출 예산 — `deploy/brainstorm.env` 주석 |
 
@@ -138,12 +140,34 @@ brainstorm-restore /var/lib/brainstorm/backups/brainstorm-….tar.gz
 
 `adapter/claude-cli-adapter.ts`. 스레드·세대마다 Claude Code 세션 하나(`--session-id`/`--resume`) · 프롬프트에는 아직 못 본 글만 · 실제 모델은 `modelUsage`에서 읽어 기록.
 
+서버(root) — 참여자와 토큰. 토큰은 화면에 안 찍고 파일로 받는다:
+
 ```bash
-mkdir -p ~/.local/lib/brainstorm-adapter && cp -r dist package.json ~/.local/lib/brainstorm-adapter/
-cp deploy/claude-cli/claude.env.example ~/.config/brainstorm/claude.env      # 고친다
-cp deploy/claude-cli/brainstorm-agent-claude.service ~/.config/systemd/user/
+brainstorm-admin participant add --id claude --name "Claude"
+(umask 077; brainstorm-admin token create --participant claude --label host-a > claude.token)
+```
+
+어댑터를 돌릴 계정 — 저장소 폴더(빌드된 `dist/` 포함)에서. `~/claude.token` 은 위 토큰 파일을 옮겨 둔 자리다:
+
+```bash
+mkdir -p ~/.config/brainstorm ~/.config/systemd/user ~/.local/lib/brainstorm-adapter ~/workspace
+install -m 600 ~/claude.token ~/.config/brainstorm/claude.token && rm ~/claude.token
+cp -r dist package.json ~/.local/lib/brainstorm-adapter/
+sed "s#/home/you#$HOME#" deploy/claude-cli/claude.env.example > ~/.config/brainstorm/claude.env   # 서버가 다른 기계면 BRAINSTORM_URL 을 고친다
+sed "s#/usr/bin/env node#$(command -v node)#" deploy/claude-cli/brainstorm-agent-claude.service > ~/.config/systemd/user/brainstorm-agent-claude.service
+set -a; . ~/.config/brainstorm/claude.env; set +a
 node ~/.local/lib/brainstorm-adapter/dist/adapter/claude-cli-adapter.js check
+systemctl --user daemon-reload
 systemctl --user enable --now brainstorm-agent-claude
+```
+
+`claude` 로그인은 이 계정에서 미리 해 둔다. 로그인 세션 없이 돌리려면 root 로 `loginctl enable-linger <계정>`.
+
+전에 깐 유닛의 node 자리를 맞출 때(Node 를 옮겼거나 옛 유닛이 `/usr/bin/node` 를 박고 있을 때):
+
+```bash
+sed -i "s#^ExecStart=\(/usr/bin/env \)\?[^ ]*node #ExecStart=$(command -v node) #" ~/.config/systemd/user/brainstorm-agent-claude.service
+systemctl --user daemon-reload && systemctl --user restart brainstorm-agent-claude
 ```
 
 권한은 코드에 박지 않는다 — `CLAUDE_EXTRA_ARGS`. 동시 실행 `BRAINSTORM_CONCURRENCY`(기본 3, 같은 스레드는 서버가 직렬로 낸다).
@@ -151,8 +175,31 @@ systemctl --user enable --now brainstorm-agent-claude
 
 ### Codex (`codex exec`)
 
-`adapter/codex-cli-adapter.ts`. 본보기 `deploy/codex-cli/codex.env.example` · `brainstorm-agent-codex.service` — 설치는 위와 같다.
-권한은 `CODEX_ARGS`(예: `--sandbox read-only --ask-for-approval never`).
+`adapter/codex-cli-adapter.ts`. 설치는 위 절과 같고 이름만 `codex` 다:
+
+서버(root) — 참여자와 토큰. 토큰은 화면에 안 찍고 파일로 받는다:
+
+```bash
+brainstorm-admin participant add --id codex --name "Codex"
+(umask 077; brainstorm-admin token create --participant codex --label host-a > codex.token)
+```
+
+어댑터를 돌릴 계정 — 저장소 폴더(빌드된 `dist/` 포함)에서. `~/codex.token` 은 위 토큰 파일을 옮겨 둔 자리다:
+
+```bash
+mkdir -p ~/.config/brainstorm ~/.config/systemd/user ~/.local/lib/brainstorm-adapter ~/workspace
+install -m 600 ~/codex.token ~/.config/brainstorm/codex.token && rm ~/codex.token
+cp -r dist package.json ~/.local/lib/brainstorm-adapter/
+sed "s#/home/you#$HOME#" deploy/codex-cli/codex.env.example > ~/.config/brainstorm/codex.env   # 서버가 다른 기계면 BRAINSTORM_URL 을 고친다
+sed "s#/usr/bin/env node#$(command -v node)#" deploy/codex-cli/brainstorm-agent-codex.service > ~/.config/systemd/user/brainstorm-agent-codex.service
+set -a; . ~/.config/brainstorm/codex.env; set +a
+node ~/.local/lib/brainstorm-adapter/dist/adapter/codex-cli-adapter.js check
+systemctl --user daemon-reload
+systemctl --user enable --now brainstorm-agent-codex
+```
+
+
+`codex` 로그인은 이 계정에서 미리 해 둔다. 권한은 `CODEX_ARGS`(본보기 값 `--sandbox read-only --ask-for-approval never`).
 
 ### OpenAI 호환 서버
 

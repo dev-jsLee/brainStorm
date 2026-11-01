@@ -189,7 +189,7 @@ const MIGRATIONS: Migration[] = [
     value TEXT NOT NULL
   );
   `,
-  // 2 — 2단계(메티 어댑터): 세대 경계. 새 세대는 base_seq 뒤의 메시지만 원문으로 받는다
+  // 2 — 2단계(OpenClaw 어댑터): 세대 경계. 새 세대는 base_seq 뒤의 메시지만 원문으로 받는다
   //     (그 앞은 context_snapshots 로 넘긴 것만). 1세대는 NULL = 스레드 처음부터.
   `
   ALTER TABLE agent_sessions ADD COLUMN base_seq INTEGER;
@@ -315,7 +315,7 @@ const MIGRATIONS: Migration[] = [
   `
   ALTER TABLE agent_sessions ADD COLUMN carry INTEGER NOT NULL DEFAULT 0;
   `,
-  // 12 — 위임 대장(2026-10-16 마스터 #339·#341): 백구가 백수(작업 세션 여럿)에게 일을 넘기기 전에 만질 범위(claims)를 선점한다.
+  // 12 — 위임 대장(2026-10-16 마스터 #339·#341): 에이전트가 작업 세션 여럿에게 일을 넘기기 전에 만질 범위(claims)를 선점한다.
   //      다른 활성 위임의 선점과 겹치면 넘기지 않는다(검사 + 넣기가 IMMEDIATE 트랜잭션 하나). 일하는 중 더 청한 범위가 잡혀 있으면
   //      기다리지 않고 바로 실패한다(교착 없음) — 백수는 멈추고 «막힘»을 보고한다. 새 표 둘 — 기존 표·행은 건드리지 않는다.
   //      assignee 는 자유 문자열(백수 세션은 여럿이고 한 에이전트 자격 증명 아래 돈다) — 참여자 FK 가 아니다.
@@ -360,7 +360,7 @@ const MIGRATIONS: Migration[] = [
   DROP INDEX claims_active;
   CREATE INDEX claims_active ON claims(repo, kind) WHERE released_at IS NULL AND granted = 1;
   `,
-  // 14 — 요청 창구(2026-10-16 마스터 #352 · 백구↔비전): 에이전트가 허용 짝의 다른 에이전트에게 «요청»을 직접 낸다(출처 'request' · 지시 아님).
+  // 14 — 요청 창구(2026-10-16 마스터 #352): 에이전트가 허용 짝의 다른 에이전트에게 «요청»을 직접 낸다(출처 'request' · 지시 아님).
   //      messages.source_kind CHECK 를 넓힌다 — 표를 다시 만들지 않고 스키마 글만 고친다(SQLite 문서 «제약을 푸는 바뀜»의 writable_schema 절차:
   //      기존 행은 옛 집합 안이라 그대로 맞고, 디스크 형식은 안 바뀐다). 새 표 둘 — request_pairs(허용 짝 · 방향 있음 · 마스터만 CLI 로 바꾼다)는
   //      비어서 시작하고(CLI `request-pair add` 로 더한다), request_holds 는 마스터가 봐야 할 요청(받은 쪽 보류 · 연쇄 상한)을 남긴다. 기존 행은 그대로.

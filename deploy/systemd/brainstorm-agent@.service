@@ -16,7 +16,7 @@ Environment=BRAINSTORM_WORKER=%i@%H
 EnvironmentFile=/etc/brainstorm/agents/%i.env
 # 토큰은 $CREDENTIALS_DIRECTORY/brainstorm-token 으로만 보인다(서비스 계정 전용). 어댑터가 그 자리를 스스로 찾는다
 LoadCredential=brainstorm-token:/etc/brainstorm/agents/%i.token
-ExecStart=/usr/bin/node /opt/brainstorm/dist/adapter/openai-adapter.js run
+ExecStart=/usr/bin/env node /opt/brainstorm/dist/adapter/openai-adapter.js run
 WorkingDirectory=/opt/brainstorm
 Restart=on-failure
 RestartSec=5

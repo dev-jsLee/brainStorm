@@ -830,7 +830,7 @@ function renderHead() {
   } else $('t-path').textContent = t('app.orphan_thread');
   // 합치기(#706): 하위 스레드면 머리에 «⤴ 상위로 합치기 (안 합친 글 N)» · 지난 합침은 경로 줄 끝에
   const mb = $('t-merge');
-  mb.hidden = !(S.me?.is_master && parent && th.kind !== 'room');
+  mb.hidden = !(S.modules?.has('merge') && S.me?.is_master && parent && th.kind !== 'room');
   if (!mb.hidden) {
     const n = d.unmerged ?? 0;
     mb.textContent = n ? t('app.merge_up_n', { n }) : t('app.merge_up_btn');
@@ -2684,6 +2684,11 @@ async function boot() {
   }
   S.me = me.participant;
   S.onCallOnly = new Set(me.on_call_only ?? []);
+  S.modules = new Set(me.modules ?? []); // 켠 선택 모듈(docs/MODULES.md)
+  // 꺼진 모듈의 자리는 안 그린다(선점 탭 = delegations)
+  const dlgOn = S.modules.has('delegations');
+  document.querySelector('.menu-item[data-menu="claims"]').hidden = !dlgOn;
+  $('tabbtn-claims').hidden = !dlgOn;
   $('me').textContent = S.me.name;
   $('logout-btn').hidden = false;
   $('top-aux-btn').hidden = false;
@@ -2691,7 +2696,7 @@ async function boot() {
   $('app-view').hidden = false;
   const ps = (await api('GET', '/api/participants')).participants;
   S.participants = new Map(ps.map((p) => [p.id, p]));
-  S.tab = ['runs', 'sessions', 'people', 'claims'].includes(store('bs.aux-tab')) ? store('bs.aux-tab') : 'runs';
+  S.tab = ['runs', 'sessions', 'people', ...(dlgOn ? ['claims'] : [])].includes(store('bs.aux-tab')) ? store('bs.aux-tab') : 'runs';
   setAux(!auxOverlays() && store('bs.aux-open') === '1', S.tab);
   await loadThreads();
   queueLive();

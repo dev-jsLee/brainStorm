@@ -103,6 +103,8 @@ export function buildPrompt(p: {
   carry?: ClaimCarry | null;
   /** 네 요청이 보류됐다는 알림(그 스레드에서 처음 불리는 실행 한 번만 · 사유 없음) */
   holdNotices?: ClaimHoldNotice[] | null;
+  /** false = 서버의 요청 모듈이 꺼짐 — 요청 규약을 안 싣는다(옛 서버는 칸이 없어 싣는다) */
+  requestRule?: boolean | null;
   /** 대면 턴(마스터 #581): 턴·역할·지금 합의문·열린 안건 — 규약과 함께 메시지 뒤에 싣는다 */
   face?: ClaimFace | null;
   /** 규약·안내 언어(claim.lang · 마스터 #823) — 없으면 ko */
@@ -129,7 +131,7 @@ export function buildPrompt(p: {
     t(L, 'prompt.source_rule'),
     handoffRule(L),
     pullRule(L),
-    requestRule(L),
+    ...(p.requestRule === false ? [] : [requestRule(L)]),
     ...(p.holdNotices?.length ? [renderHoldNotices(p.holdNotices, L)] : []),
     '',
   ];

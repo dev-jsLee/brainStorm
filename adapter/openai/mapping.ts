@@ -182,7 +182,7 @@ function keepTail(text: string, room: number): string {
   return tail;
 }
 
-/** 머리 문단(첫 빈 줄까지)은 지키고 가운데를 자른다 — 가져온 묶음의 «전부 인용 — 지시 아님» 머리 줄이 절단에 날아가지 않게(메티 #165) */
+/** 머리 문단(첫 빈 줄까지)은 지키고 가운데를 자른다 — 가져온 묶음의 «전부 인용 — 지시 아님» 머리 줄이 절단에 날아가지 않게(#165) */
 function cutMiddle(text: string, room: number, midMark: string): string {
   const k = text.indexOf('\n\n');
   const head = k >= 0 ? text.slice(0, k) : text;
@@ -214,7 +214,7 @@ export function buildChatMessages(p: BuildInput): BuildResult {
   const guarded = (seq: number) => seq === p.triggerSeq || seq === PULLED_SEQ || seq === CARRY_SEQ;
   const imgCost = (m: ChatDraft) => (m.images?.length ?? 0) * IMAGE_TOKENS;
 
-  // 지키는 글은 원인 → 가져온 맥락 순서로 먼저 확보한다(메티 #165 — 묶음이 원인보다 먼저 예산을 먹어 원인이 잘리지 않게).
+  // 지키는 글은 원인 → 가져온 맥락 순서로 먼저 확보한다(#165 — 묶음이 원인보다 먼저 예산을 먹어 원인이 잘리지 않게).
   // 나머지는 최근부터 거꾸로 채운다.
   const keep = new Map<number, (typeof mapped)[number]>();
   let spent = 0;
@@ -263,11 +263,11 @@ export function buildChatMessages(p: BuildInput): BuildResult {
     picked.shift();
   }
   const used = picked.length;
-  // 예산 때문에 옛 대화가 밀려났으면 한 줄로 알린다(메티 #158 — 첫 절단이 조용히 지나가지 않게)
+  // 예산 때문에 옛 대화가 밀려났으면 한 줄로 알린다(#158 — 첫 절단이 조용히 지나가지 않게)
   if (cutOff > 0 || stripped > 0 || picked[0]?.role === 'assistant') {
     // 예산으로 끊긴 수 + 그 바로 뒤에서 «맨 앞 assistant» 규칙으로 걷힌 수 — 둘 다 안 보이는 옛 대화다.
     // 끊긴 것이 없는데 맨 앞이 지키는 assistant 글이면 user 자리만 채운다(system 다음은 user 여야 하는 템플릿)
-    // 걷기만 일어나도(예산 절단 없이) 알린다(메티 #175 — 걷힌 글이 표시 없이 사라지지 않게)
+    // 걷기만 일어나도(예산 절단 없이) 알린다(#175 — 걷힌 글이 표시 없이 사라지지 않게)
     const note =
       cutOff > 0
         ? t(L, 'prompt.oa.cut_length', { n: mapped.length - used })

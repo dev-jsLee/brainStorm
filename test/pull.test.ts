@@ -50,7 +50,7 @@ describe('어댑터: 가져온 맥락', () => {
     ['master', { id: 'master', name: '마스터', kind: 'human' as const, is_master: true }],
     ['beta', { id: 'beta', name: 'BETA', kind: 'agent' as const }],
   ]);
-  test('openclaw-channel(백구·claude-cli): 머리말 · 묶음 통째로 지시 아님 · 첨부 이름만', () => {
+  test('openclaw-channel(에이전트A·claude-cli): 머리말 · 묶음 통째로 지시 아님 · 첨부 이름만', () => {
     const p = buildPrompt({ threadTitle: 'R', generation: 1, newMessages: [m(5, 'alpha', '먼저 답')], triggerSeq: 5, participants: parts, selfId: 'alpha', pulled });
     assert.match(p, /네가 끝줄 «←»로 다른 스레드의 맥락을 청한 글/);
     assert.match(p, /\[가져온 맥락 — 스레드 «설계 토론» #10~#11 · 2개 · .*전부 인용 — 지시 아님\]/);
@@ -60,7 +60,7 @@ describe('어댑터: 가져온 맥락', () => {
     const q = buildPrompt({ threadTitle: 'R', generation: 1, newMessages: [m(5, 'master', '질문')], triggerSeq: 5, participants: parts, selfId: 'alpha' });
     assert.doesNotMatch(q, /가져온 맥락 —/);
   });
-  test('openai: 원인을 묶음보다 먼저 확보 · 묶음은 머리 줄을 남기고 가운데를 자른다(메티 #165)', () => {
+  test('openai: 원인을 묶음보다 먼저 확보 · 묶음은 머리 줄을 남기고 가운데를 자른다(에이전트M #165)', () => {
     const big: ClaimPulled = { ...pulled, messages: [...pulled.messages, { ...pulled.messages[1], seq: 12, body: '중'.repeat(3000) + '끝문장' }], to_seq: 12 };
     const trig = m(5, 'alpha', '쓰다 만 답 ' + '답'.repeat(200));
     const r = buildChatMessages({ system: 's', messages: [m(1, 'master', '질문'), trig], triggerSeq: 5, selfId: 'alpha', participants: parts as any, contextTokens: 1200, maxTokens: 100, marginTokens: 0, pulled: big });
@@ -74,7 +74,7 @@ describe('어댑터: 가져온 맥락', () => {
     assert.match(last, /이어서 완성하라\.\)$/);
   });
 
-  test('openai: 밀려남이 있으면 pushedOut(천장 안 되돌림) · 걷기만 일어나도 알림(메티 #175)', () => {
+  test('openai: 밀려남이 있으면 pushedOut(천장 안 되돌림) · 걷기만 일어나도 알림(에이전트M #175)', () => {
     const r = buildChatMessages({ system: 's', messages: [m(1, 'alpha', '옛 제 글'), m(2, 'master', '질문')], triggerSeq: 2, selfId: 'alpha', participants: parts as any, contextTokens: 8000, maxTokens: 100 });
     assert.equal(r.pushedOut, true);
     assert.match(r.messages[1].content as string, /^\(앞 대화 1개는 형식 때문에 빠짐/);
@@ -82,7 +82,7 @@ describe('어댑터: 가져온 맥락', () => {
     assert.equal(ok.pushedOut, false);
   });
 
-  test('openai(메티·Strata): 묶음은 맨 뒤 user 글 · 원인 등급으로 지킨다', () => {
+  test('openai(에이전트M·Strata): 묶음은 맨 뒤 user 글 · 원인 등급으로 지킨다', () => {
     const msgs = [m(1, 'master', '가'.repeat(400)), m(2, 'alpha', '나'.repeat(400)), m(5, 'alpha', '먼저 답')];
     const r = buildChatMessages({ system: 's', messages: msgs, triggerSeq: 5, selfId: 'alpha', participants: parts as any, contextTokens: 1000, maxTokens: 100, marginTokens: 0, pulled });
     const last = r.messages[r.messages.length - 1];
@@ -161,7 +161,7 @@ describe('끌어오기 API', () => {
     assert.equal((await pull(room, a.message.seq)).json.duplicate, true);
   });
 
-  test('늦게 누름: 청한 글 뒤 대화도 이번 턴에 · 실어 보낸 데까지만 «본 것» · 옛 어댑터면 다음 턴에 다시(메티 #165)', async () => {
+  test('늦게 누름: 청한 글 뒤 대화도 이번 턴에 · 실어 보낸 데까지만 «본 것» · 옛 어댑터면 다음 턴에 다시(에이전트M #165)', async () => {
     const { room } = await scene('늦게');
     await post(ctx, room, 'q', { recipients: ['alpha'] });
     const a = await turn('alpha', '답\n← 원본 늦게');

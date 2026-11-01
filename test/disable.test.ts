@@ -1,4 +1,4 @@
-// 참여자 끄기(2026-10-19 마스터 #441 «메티를 비활성화하고 숨겨둬»)
+// 참여자 끄기(2026-10-19 마스터 #441 «비활성화하고 숨겨둬»)
 //   토큰 폐기 · 멤버 해제 · 기본 수신자 비움 · 목록에서 빠짐 · 옛 글 이름은 남음 · 마스터 불가 · 두 번이면 noop
 import assert from 'node:assert/strict';
 import { after, before, describe, test } from 'node:test';

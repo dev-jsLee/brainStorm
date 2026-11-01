@@ -269,6 +269,7 @@ async function admitClaim(id) {
 
 /** WS {t:'delegation'} — 다시 읽고 그린다(연출은 장면 차이로) */
 function onDelegationNotice() {
+  if (!S.modules?.has('delegations')) return;
   if (S.auxOpen && S.tab === 'claims') loadClaims().catch(() => {});
   else S.dlg = null; // 탭을 열 때 새로 읽는다
 }

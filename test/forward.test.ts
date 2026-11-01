@@ -59,7 +59,7 @@ describe('어댑터 맥락(전달)', () => {
     assert.doesNotMatch(q, /전달됨|· 대기\]/);
     assert.match(q, /마지막\(▶\) 메시지에 답하라/);
   });
-  test('openai: 넘김 규약은 참여자별로 켠다(메티 켬 · Strata 끔) · 전달 표시 · 제 글 표식', () => {
+  test('openai: 넘김 규약은 참여자별로 켠다(에이전트M 켬 · Strata 끔) · 전달 표시 · 제 글 표식', () => {
     const tf = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'bs-ho-')), 'tok');
     fs.writeFileSync(tf, 'bst_x', { mode: 0o600 });
     const base = { BRAINSTORM_TOKEN_FILE: tf, OPENAI_BASE_URL: 'http://x/v1', OPENAI_MODEL: 'm' };
@@ -70,12 +70,12 @@ describe('어댑터 맥락(전달)', () => {
       ['master', { id: 'master', name: '마스터', kind: 'human' as const, is_master: true }],
       ['beta', { id: 'beta', name: 'BETA', kind: 'agent' as const }],
     ]);
-    const msgs = [m(0), m(1, 'meti', { source_kind: 'proposal', handoff_to: ['beta'], handoff_state: { beta: 'pending' } }), m(2), m(3, 'beta', { source_kind: 'proposal' })]; // 맨 앞 assistant 는 걷히므로 마스터 글부터
-    const r = buildChatMessages({ system: 's', messages: msgs, triggerSeq: 3, selfId: 'meti', participants: parts as any, contextTokens: 8000, maxTokens: 500, forwarded: true });
+    const msgs = [m(0), m(1, 'agent-m', { source_kind: 'proposal', handoff_to: ['beta'], handoff_state: { beta: 'pending' } }), m(2), m(3, 'beta', { source_kind: 'proposal' })]; // 맨 앞 assistant 는 걷히므로 마스터 글부터
+    const r = buildChatMessages({ system: 's', messages: msgs, triggerSeq: 3, selfId: 'agent-m', participants: parts as any, contextTokens: 8000, maxTokens: 500, forwarded: true });
     const text = r.messages.map((x) => x.content).join('\n---\n');
     assert.match(text, /\[→ BETA · 대기\]/);
     assert.match(text, /마스터가 이 글을 너에게 전달했다/);
-    const r2 = buildChatMessages({ system: 's', messages: msgs, triggerSeq: 3, selfId: 'meti', participants: parts as any, contextTokens: 8000, maxTokens: 500 });
+    const r2 = buildChatMessages({ system: 's', messages: msgs, triggerSeq: 3, selfId: 'agent-m', participants: parts as any, contextTokens: 8000, maxTokens: 500 });
     assert.doesNotMatch(r2.messages.map((x) => x.content).join('\n'), /전달했다/);
   });
   test('openai: 전달이면 원인을 맨 뒤로(chat 은 마지막에 답한다)', () => {
@@ -205,7 +205,7 @@ describe('수동 전달 API', () => {
     await A('beta', `/api/adapter/runs/${c2.run.id}/complete`, { run_token: c2.run.run_token, body: 'B3' });
   });
 
-  test('누른 뒤 ~ claim 전에 들어온 글: 이번 맥락엔 없고(머리는 누른 때로 얼림) 다음 턴에 빠짐없이 온다(메티 #75)', async () => {
+  test('누른 뒤 ~ claim 전에 들어온 글: 이번 맥락엔 없고(머리는 누른 때로 얼림) 다음 턴에 빠짐없이 온다(에이전트M #75)', async () => {
     const th = await room('대기 중 새 글');
     await post(ctx, th, 'q1', { recipients: ['alpha'] });
     const a1 = await turn('alpha', 'A1');

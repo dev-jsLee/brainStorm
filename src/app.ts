@@ -9,6 +9,7 @@ import { WebSocketServer, type WebSocket } from 'ws';
 import type { Config } from './config.js';
 import { openDb, type DB } from './db.js';
 import { clientBundle, has, languages, normLang, t } from './i18n.js';
+import { mountModules, type BrainstormModule } from './modules.js';
 import { ANON_ACTOR, ApiError, Store, type NoticeEvent, type Principal } from './store.js';
 
 const COOKIE = 'bs_session';
@@ -57,7 +58,7 @@ export interface App {
   close(): Promise<void>;
 }
 
-export async function buildApp(cfg: Config, opts: { logger?: boolean } = {}): Promise<App> {
+export async function buildApp(cfg: Config, opts: { logger?: boolean; registry?: BrainstormModule[] } = {}): Promise<App> {
   const db = openDb(cfg.dbPath);
   const store = new Store(db, cfg);
 
@@ -182,6 +183,9 @@ export async function buildApp(cfg: Config, opts: { logger?: boolean } = {}): Pr
     return reply.send(i18nBundle);
   });
 
+  // 켠 모듈 이름 전부(아직 core 안에 있는 것도) — 화면이 버튼을 고를 때 본다(/api/me.modules)
+  const modules = cfg.modules;
+
   fastify.get('/healthz', async () => {
     db.prepare('SELECT 1').get();
     return { ok: true, schema: db.pragma('user_version', { simple: true }), server_seq: store.serverSeq() };
@@ -237,6 +241,7 @@ export async function buildApp(cfg: Config, opts: { logger?: boolean } = {}): Pr
     on_call_only: cfg.onCallOnly,
     lang: store.lang(),
     langs: languages(),
+    modules,
   }));
   // 언어(마스터만 · #823): 화면 언어를 고르면 서버 언어도 같이 — 에이전트 규약·서버 안내가 따른다
   fastify.put<{ Body: { lang?: unknown } }>('/api/settings/lang', { preHandler: auth }, async (req) => store.setLang(req.principal!, req.body?.lang));
@@ -266,7 +271,6 @@ export async function buildApp(cfg: Config, opts: { logger?: boolean } = {}): Pr
     const r = store.forkThread(req.principal!, req.params.id, (req.body ?? {}) as any);
     return reply.code(r.duplicate ? 200 : 201).send(r);
   });
-  fastify.post<P>('/api/threads/:id/merge', { preHandler: auth }, async (req, reply) => reply.code(201).send(store.mergeThread(req.principal!, req.params.id)));
   fastify.get<P & { Querystring: { after?: string; limit?: string } }>('/api/threads/:id/messages', { preHandler: auth }, async (req) =>
     store.listMessages(req.principal!, req.params.id, Number(req.query.after ?? 0) || 0, Number(req.query.limit ?? 200) || 200),
   );
@@ -296,22 +300,8 @@ export async function buildApp(cfg: Config, opts: { logger?: boolean } = {}): Pr
     return store.forwardMessage(req.principal!, req.params.id, seq, (req.body ?? {}) as any);
   });
   // 요청 창구(마스터 #352): 보류된 요청 목록·확인 · 허용 짝 조회(바꾸기는 CLI)
-  fastify.get<P>('/api/threads/:id/request-holds', { preHandler: auth }, async (req) => ({ holds: store.listRequestHolds(req.principal!, req.params.id) }));
-  fastify.post<{ Params: { id: string } }>('/api/request-holds/:id/ack', { preHandler: auth }, async (req) => store.ackRequestHold(req.principal!, req.params.id));
-  fastify.get('/api/request-pairs', { preHandler: auth }, async () => ({ pairs: store.listRequestPairs(), chain_max: cfg.requestChainMax }));
-  // 대면 모드(마스터 #581): 켜고 끄기·결정·판정·멈추기·다시 돌리기는 마스터만 · 보기는 멤버
-  fastify.post<P & { Body: { mode?: unknown } }>('/api/threads/:id/mode', { preHandler: auth }, async (req) =>
-    store.setThreadMode(req.principal!, req.params.id, (req.body ?? {}).mode),
-  );
-  fastify.get<P & { Querystring: { round?: string } }>('/api/threads/:id/face', { preHandler: auth }, async (req) =>
-    store.getFace(req.principal!, req.params.id, req.query.round || undefined),
-  );
-  fastify.post<{ Params: { id: string; iid: string } }>('/api/face/:id/issues/:iid/decide', { preHandler: auth }, async (req) =>
-    store.decideIssue(req.principal!, req.params.id, req.params.iid, (req.body ?? {}) as any),
-  );
-  fastify.post<{ Params: { id: string } }>('/api/face/:id/verdict', { preHandler: auth }, async (req) => store.faceVerdict(req.principal!, req.params.id, (req.body ?? {}) as any));
-  fastify.post<{ Params: { id: string } }>('/api/face/:id/stop', { preHandler: auth }, async (req) => store.faceStop(req.principal!, req.params.id));
-  fastify.post<{ Params: { id: string } }>('/api/face/:id/retry', { preHandler: auth }, async (req) => store.faceRetry(req.principal!, req.params.id));
+  // 선택 모듈(마스터 #1193 · docs/MODULES.md): 켠 것만 붙는다 — 대면(face) 경로는 src/modules/face
+  mountModules(fastify, { db, cfg, store, auth }, cfg.modules, opts.registry);
   fastify.get<P>('/api/threads/:id/runs', { preHandler: auth }, async (req) => ({ runs: store.listRuns(req.principal!, req.params.id) }));
   fastify.get<P>('/api/threads/:id/deliveries', { preHandler: auth }, async (req) => ({
     deliveries: store.listDeliveries(req.principal!, req.params.id),
@@ -351,24 +341,6 @@ export async function buildApp(cfg: Config, opts: { logger?: boolean } = {}): Pr
   fastify.post<{ Params: { id: string } }>('/api/deliveries/:id/cancel', { preHandler: auth }, async (req) =>
     store.cancelDelivery(req.principal!, req.params.id),
   );
-
-  // ── 위임 대장(마이그레이션 12): 백구 → 백수 일감과 만질 범위 선점. 권한은 Store.delegationGate 한곳 · 겹침은 409 claim_conflict ──
-  type D = { Params: { id: string } };
-  fastify.get<{ Querystring: { active?: string; recent?: string } }>('/api/delegations', { preHandler: auth }, async (req) => store.listDelegations(req.principal!, req.query));
-  fastify.post('/api/delegations', { preHandler: auth }, async (req, reply) =>
-    reply.code(201).send(store.createDelegation(req.principal!, (req.body ?? {}) as any)),
-  );
-  fastify.get<D>('/api/delegations/:id', { preHandler: auth }, async (req) => store.getDelegation(req.principal!, req.params.id));
-  fastify.post<D & { Body: { claims?: unknown } }>('/api/delegations/:id/claims', { preHandler: auth }, async (req) =>
-    store.addClaims(req.principal!, req.params.id, (req.body ?? {}).claims),
-  );
-  fastify.post<D & { Body: { status?: unknown; result?: unknown } }>('/api/delegations/:id/status', { preHandler: auth }, async (req) =>
-    store.setDelegationStatus(req.principal!, req.params.id, (req.body ?? {}).status, (req.body ?? {}).result),
-  );
-  fastify.post<D>('/api/delegations/:id/heartbeat', { preHandler: auth }, async (req) => store.delegationHeartbeat(req.principal!, req.params.id));
-  fastify.post<D>('/api/delegations/:id/release', { preHandler: auth }, async (req) => store.releaseStale(req.principal!, req.params.id));
-  // 대기 위임 진입(마이그레이션 13) — 마스터·만든 이가 «먼저 해도 된다»고 판정할 때만. 아직 겹치면 409 claim_conflict
-  fastify.post<D>('/api/delegations/:id/admit', { preHandler: auth }, async (req) => store.admitDelegation(req.principal!, req.params.id));
 
   // ── 첨부 ──
   fastify.post<P & { Querystring: { name?: string } }>(

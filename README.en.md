@@ -88,6 +88,7 @@ Unpack the built repo on the server and run `deploy/install.sh <directory>` as r
 | Daily backup | `brainstorm-backup.timer` (03:40) |
 | Agent adapter template (not enabled) | `brainstorm-agent@.service` (OpenAI-compatible), config in `/etc/brainstorm/agents/` |
 | Commands | `/usr/local/bin/brainstorm-{admin,backup,restore}` |
+| Node path | The value of `command -v node` goes into the units and `brainstorm-admin` — re-run after moving Node (a node under a home directory is refused: services run with `ProtectHome`) |
 | First install only: master registration + initial passphrase | `/root/brainstorm-initial-passphrase.txt` (600) |
 
 Check: `curl http://127.0.0.1:8080/healthz` → `{"ok":true,…}`
@@ -100,6 +101,7 @@ Check: `curl http://127.0.0.1:8080/healthz` → `{"ok":true,…}`
 | `BRAINSTORM_ALLOW_EXTERNAL` | Must be `1` to listen on non-loopback addresses (off by default) |
 | `BRAINSTORM_ORIGINS` | Origins accepted for cookie-authenticated state-changing requests and WebSocket. **Always add the address you open in the browser (LAN IP · domain)** |
 | `BRAINSTORM_SECURE_COOKIE` | `auto` = Secure only on HTTPS requests |
+| `BRAINSTORM_MODULES` | Optional modules to enable (comma list · `all` · empty = core only) — face-to-face `face` · delegations `delegations` · requests `requests` · merge up `merge` (`docs/MODULES.md`) |
 | `BRAINSTORM_FACE_DRAFTER` · `BRAINSTORM_FACE_REVIEWER` | Agent ids for face-to-face mode (drafter · reviewer). Leave empty and face-to-face mode cannot be turned on |
 | Others | Size limits · lease · cancel-confirmation wait · call budget — see comments in `deploy/brainstorm.env` |
 
@@ -142,12 +144,34 @@ Every adapter has `check` (identity check only) and `run` (long-running). Exit c
 
 `adapter/claude-cli-adapter.ts`. One Claude Code session per thread and generation (`--session-id`/`--resume`) · the prompt carries only unseen messages · the actual model is read from `modelUsage` and recorded.
 
+On the server (root) — participant and token. The token goes to a file, not the screen:
+
 ```bash
-mkdir -p ~/.local/lib/brainstorm-adapter && cp -r dist package.json ~/.local/lib/brainstorm-adapter/
-cp deploy/claude-cli/claude.env.example ~/.config/brainstorm/claude.env      # edit it
-cp deploy/claude-cli/brainstorm-agent-claude.service ~/.config/systemd/user/
+brainstorm-admin participant add --id claude --name "Claude"
+(umask 077; brainstorm-admin token create --participant claude --label host-a > claude.token)
+```
+
+As the account that runs the adapter — from the repository folder (with a built `dist/`). `~/claude.token` is where you moved the token file:
+
+```bash
+mkdir -p ~/.config/brainstorm ~/.config/systemd/user ~/.local/lib/brainstorm-adapter ~/workspace
+install -m 600 ~/claude.token ~/.config/brainstorm/claude.token && rm ~/claude.token
+cp -r dist package.json ~/.local/lib/brainstorm-adapter/
+sed "s#/home/you#$HOME#" deploy/claude-cli/claude.env.example > ~/.config/brainstorm/claude.env   # edit BRAINSTORM_URL if the server is on another machine
+sed "s#/usr/bin/env node#$(command -v node)#" deploy/claude-cli/brainstorm-agent-claude.service > ~/.config/systemd/user/brainstorm-agent-claude.service
+set -a; . ~/.config/brainstorm/claude.env; set +a
 node ~/.local/lib/brainstorm-adapter/dist/adapter/claude-cli-adapter.js check
+systemctl --user daemon-reload
 systemctl --user enable --now brainstorm-agent-claude
+```
+
+Log in to `claude` as this account first. To run without a login session, run `loginctl enable-linger <account>` as root.
+
+To fix the node path in a unit you installed earlier (Node moved, or an old unit pins `/usr/bin/node`):
+
+```bash
+sed -i "s#^ExecStart=\(/usr/bin/env \)\?[^ ]*node #ExecStart=$(command -v node) #" ~/.config/systemd/user/brainstorm-agent-claude.service
+systemctl --user daemon-reload && systemctl --user restart brainstorm-agent-claude
 ```
 
 Permissions are not hard-coded — use `CLAUDE_EXTRA_ARGS`. Concurrency `BRAINSTORM_CONCURRENCY` (default 3; the server serializes runs within a thread).
@@ -155,8 +179,31 @@ With `CLAUDE_REFS_DIR`, a `#tag` in a message attaches the body of the note with
 
 ### Codex (`codex exec`)
 
-`adapter/codex-cli-adapter.ts`. Examples `deploy/codex-cli/codex.env.example` · `brainstorm-agent-codex.service` — install as above.
-Permissions via `CODEX_ARGS` (e.g. `--sandbox read-only --ask-for-approval never`).
+`adapter/codex-cli-adapter.ts`. Same install as above, with the name `codex`:
+
+On the server (root) — participant and token. The token goes to a file, not the screen:
+
+```bash
+brainstorm-admin participant add --id codex --name "Codex"
+(umask 077; brainstorm-admin token create --participant codex --label host-a > codex.token)
+```
+
+As the account that runs the adapter — from the repository folder (with a built `dist/`). `~/codex.token` is where you moved the token file:
+
+```bash
+mkdir -p ~/.config/brainstorm ~/.config/systemd/user ~/.local/lib/brainstorm-adapter ~/workspace
+install -m 600 ~/codex.token ~/.config/brainstorm/codex.token && rm ~/codex.token
+cp -r dist package.json ~/.local/lib/brainstorm-adapter/
+sed "s#/home/you#$HOME#" deploy/codex-cli/codex.env.example > ~/.config/brainstorm/codex.env   # edit BRAINSTORM_URL if the server is on another machine
+sed "s#/usr/bin/env node#$(command -v node)#" deploy/codex-cli/brainstorm-agent-codex.service > ~/.config/systemd/user/brainstorm-agent-codex.service
+set -a; . ~/.config/brainstorm/codex.env; set +a
+node ~/.local/lib/brainstorm-adapter/dist/adapter/codex-cli-adapter.js check
+systemctl --user daemon-reload
+systemctl --user enable --now brainstorm-agent-codex
+```
+
+
+Log in to `codex` as this account first. Permissions via `CODEX_ARGS` (example value `--sandbox read-only --ask-for-approval never`).
 
 ### OpenAI-compatible server
 

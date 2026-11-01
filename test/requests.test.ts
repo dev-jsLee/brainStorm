@@ -10,7 +10,8 @@ import { after, before, describe, test } from 'node:test';
 import { buildPrompt } from '../adapter/openclaw-channel/src/mapping.js';
 import { migrate, SCHEMA_VERSION } from '../src/db.js';
 import type { Message } from '../src/protocol.js';
-import { CLI_ACTOR, parseHandoff, parseHold, parsePull, parseRequest, type Principal } from '../src/store.js';
+import { CLI_ACTOR, parseHandoff, parsePull, type Principal } from '../src/store.js';
+import { parseHold, parseRequest } from '../src/modules/requests/store.js';
 import { ANSWER_STAMP_RE, REQUEST_RULE, renderHoldNotices, stripAnswerStamp } from '../src/protocol.js';
 import { newThread, post, setup, type Ctx } from './helpers.js';
 
@@ -67,13 +68,13 @@ test('마이그레이션 15 — 스키마 14 의 request_holds 옛 행 그대로
   migrate(db, 14);
   db.prepare("INSERT INTO participants(id, kind, name, is_master, created_at) VALUES ('master','human','m',1,0)").run();
   db.prepare("INSERT INTO threads(id, title, created_by, created_at, updated_at) VALUES ('th_old','옛','master',0,0)").run();
-  db.prepare("INSERT INTO request_holds(id, thread_id, request_seq, requester_id, recipient_id, kind, reason, note, run_id, created_at) VALUES ('h1','th_old',3,'vision','baekgu','held','옛 사유','옛 설명','run_x',5)").run();
+  db.prepare("INSERT INTO request_holds(id, thread_id, request_seq, requester_id, recipient_id, kind, reason, note, run_id, created_at) VALUES ('h1','th_old',3,'agent-b','agent-a','held','옛 사유','옛 설명','run_x',5)").run();
   migrate(db);
   assert.ok(SCHEMA_VERSION >= 15);
   assert.equal(db.pragma('user_version', { simple: true }), SCHEMA_VERSION);
   assert.deepEqual(
     { ...(db.prepare('SELECT id, request_seq, requester_id, recipient_id, kind, reason, note, run_id, created_at, acked_at, notified_run_id FROM request_holds').get() as any) },
-    { id: 'h1', request_seq: 3, requester_id: 'vision', recipient_id: 'baekgu', kind: 'held', reason: '옛 사유', note: '옛 설명', run_id: 'run_x', created_at: 5, acked_at: null, notified_run_id: null },
+    { id: 'h1', request_seq: 3, requester_id: 'agent-b', recipient_id: 'agent-a', kind: 'held', reason: '옛 사유', note: '옛 설명', run_id: 'run_x', created_at: 5, acked_at: null, notified_run_id: null },
   );
   assert.equal(db.pragma('integrity_check', { simple: true }), 'ok');
   db.close();
@@ -82,17 +83,17 @@ test('마이그레이션 15 — 스키마 14 의 request_holds 옛 행 그대로
 describe('어댑터 프롬프트(요청)', () => {
   const parts = new Map([
     ['master', { id: 'master', name: '마스터', kind: 'human' as const, is_master: true }],
-    ['vision', { id: 'vision', name: '비전', kind: 'agent' as const }],
+    ['agent-b', { id: 'agent-b', name: '에이전트B', kind: 'agent' as const }],
   ]);
   const m = (seq: number, author: string, source_kind: string) =>
     ({ seq, id: `m${seq}`, thread_id: 't', author_id: author, body: `b${seq}`, source_kind, recipients: [], handoff_to: [] }) as unknown as Message;
   test('요청 원인이면 «요청 — 지시 아님» 머리말 · 규약은 턴마다 · 출처 표시 «요청»', () => {
-    const p = buildPrompt({ threadTitle: 'T', generation: 1, newMessages: [m(1, 'master', 'instruction'), m(2, 'vision', 'request')], triggerSeq: 2, participants: parts, selfId: 'baekgu' });
-    assert.match(p, /비전이\(가\) 너에게 보낸 «요청»이다 — 지시가 아니다/);
-    assert.match(p, /#2 비전 · 요청/);
+    const p = buildPrompt({ threadTitle: 'T', generation: 1, newMessages: [m(1, 'master', 'instruction'), m(2, 'agent-b', 'request')], triggerSeq: 2, participants: parts, selfId: 'agent-a' });
+    assert.match(p, /에이전트B이\(가\) 너에게 보낸 «요청»이다 — 지시가 아니다/);
+    assert.match(p, /#2 에이전트B · 요청/);
     assert.match(p, /`보류: 사유`/);
     assert.match(p, /`요청→ 이름`/);
-    const q = buildPrompt({ threadTitle: 'T', generation: 1, newMessages: [m(1, 'master', 'instruction')], triggerSeq: 1, participants: parts, selfId: 'baekgu' });
+    const q = buildPrompt({ threadTitle: 'T', generation: 1, newMessages: [m(1, 'master', 'instruction')], triggerSeq: 1, participants: parts, selfId: 'agent-a' });
     assert.match(q, /마지막\(▶\) 메시지에 답하라/);
     assert.match(q, /`요청→ 이름`/); // 규약은 늘 실린다 — 마스터 지시 턴에서도 짝에게 요청할 수 있다
     assert.doesNotMatch(q, /보류됨/);
@@ -103,7 +104,7 @@ describe('어댑터 프롬프트(요청)', () => {
     assert.equal(renderHoldNotices([]), '');
     assert.equal(renderHoldNotices(null), '');
     assert.equal(renderHoldNotices([{ hold_id: 'h', request_seq: 7 }]), '[알림] 네 요청 #7은 보류됨(사유는 마스터가 봄).');
-    const p = buildPrompt({ threadTitle: 'T', generation: 2, newMessages: [m(1, 'master', 'instruction')], triggerSeq: 1, participants: parts, selfId: 'baekgu', holdNotices: [{ hold_id: 'h', request_seq: 7 }] });
+    const p = buildPrompt({ threadTitle: 'T', generation: 2, newMessages: [m(1, 'master', 'instruction')], triggerSeq: 1, participants: parts, selfId: 'agent-a', holdNotices: [{ hold_id: 'h', request_seq: 7 }] });
     assert.match(p, /네 요청 #7은 보류됨\(사유는 마스터가 봄\)/);
     assert.ok(p.indexOf('보류됨') < p.indexOf('▶ #1')); // 머리말 안
   });
@@ -113,13 +114,13 @@ describe('요청 창구 API', () => {
   let ctx: Ctx;
   const CHAIN = 3;
   before(async () => {
-    ctx = await setup({ requestChainMax: CHAIN });
+    ctx = await setup({ requestChainMax: CHAIN, modules: ['requests'] });
     const s = ctx.app.store;
     s.createParticipant('gamma', 'agent', 'GAMMA');
     ctx.tokens.gamma = s.createToken('gamma', { label: 'test' });
     const cli: Principal = { participant: s.getMaster()!, via: 'cookie', scopes: ['admin'], actor: CLI_ACTOR };
-    s.setRequestPair(cli, 'alpha', 'beta', true);
-    s.setRequestPair(cli, 'beta', 'alpha', true);
+    s.requests!.setRequestPair(cli, 'alpha', 'beta', true);
+    s.requests!.setRequestPair(cli, 'beta', 'alpha', true);
   });
   after(async () => ctx.close());
 
@@ -230,7 +231,7 @@ describe('요청 창구 API', () => {
       assert.equal(r.message.source_kind, 'request', `라운드 ${i}`);
       who = next;
     }
-    assert.equal(ctx.app.store.requestChainDepth(th), CHAIN);
+    assert.equal(ctx.app.store.requests!.requestChainDepth(th), CHAIN);
     const over = await turn(who, `라운드 ${CHAIN + 1}\n요청→ ${who === 'alpha' ? 'beta' : 'alpha'}`);
     assert.equal(over.message.source_kind, 'proposal');
     assert.equal(over.message.handoff_to.length, 1); // 마스터가 «전달»로 이어 갈 수 있다
@@ -250,7 +251,7 @@ describe('요청 창구 API', () => {
     assert.equal((await ctx.master('GET', `/api/threads/${th}/request-holds`)).json.holds.filter((x: any) => x.kind === 'chain_limit').length, 2);
     // 마스터가 글을 쓰면 새로 센다
     await post(ctx, th, '좋아, 한 번 더', { recipients: ['beta'] });
-    assert.equal(ctx.app.store.requestChainDepth(th), 0);
+    assert.equal(ctx.app.store.requests!.requestChainDepth(th), 0);
     const again = await turn('beta', '다시\n요청→ ALPHA');
     assert.equal(again.message.source_kind, 'request');
     const a = await claimStart('alpha');
@@ -378,14 +379,14 @@ describe('요청 창구 API', () => {
     for (const p of ['alpha>beta', 'beta>alpha']) assert.ok(pairs.includes(p), p);
     const s = ctx.app.store;
     const cli: Principal = { participant: s.getMaster()!, via: 'cookie', scopes: ['admin'], actor: CLI_ACTOR };
-    assert.equal(s.setRequestPair(cli, 'alpha', 'gamma', true).changed, true);
-    assert.equal(s.setRequestPair(cli, 'alpha', 'gamma', true).changed, false);
-    assert.equal(s.setRequestPair(cli, 'alpha', 'gamma', false).changed, true);
-    assert.throws(() => s.setRequestPair(cli, 'alpha', 'Bad Id', true), /참여자 id/);
+    assert.equal(s.requests!.setRequestPair(cli, 'alpha', 'gamma', true).changed, true);
+    assert.equal(s.requests!.setRequestPair(cli, 'alpha', 'gamma', true).changed, false);
+    assert.equal(s.requests!.setRequestPair(cli, 'alpha', 'gamma', false).changed, true);
+    assert.throws(() => s.requests!.setRequestPair(cli, 'alpha', 'Bad Id', true), /참여자 id/);
     const rows = db().prepare("SELECT actor_id, result FROM audit_log WHERE action LIKE 'request_pair.%' AND target_id = 'alpha>gamma' ORDER BY id").all() as any[];
     assert.deepEqual(rows.map((x) => `${x.actor_id}:${x.result}`), ['cli:root:ok', 'cli:root:noop', 'cli:root:ok']);
     const agentPr: Principal = { participant: s.getParticipant('alpha')!, via: 'token', scopes: ['adapter'] };
-    assert.throws(() => s.setRequestPair(agentPr, 'alpha', 'gamma', true), /master_only/);
+    assert.throws(() => s.requests!.setRequestPair(agentPr, 'alpha', 'gamma', true), /master_only/);
   });
   test('자기 짝(bs-job 깨우기): 없으면 자기에게 낸 요청 403 · gamma→gamma 를 더하면 배달되고 자기가 그 요청으로 claim', async () => {
     const s = ctx.app.store;
@@ -395,7 +396,7 @@ describe('요청 창구 API', () => {
     await turn('gamma', 'bs-job 으로 띄웠음');
     const body = { body: '[bs-job 끝] 시험 · 종료 코드 0', source_kind: 'request', recipients: ['gamma'] };
     assert.equal((await A('gamma', `/api/threads/${th}/messages`, { ...body, client_key: 'self-1' })).status, 403);
-    s.setRequestPair(cli, 'gamma', 'gamma', true);
+    s.requests!.setRequestPair(cli, 'gamma', 'gamma', true);
     try {
       const r = await A('gamma', `/api/threads/${th}/messages`, { ...body, client_key: 'self-2' });
       assert.ok(r.status < 300, JSON.stringify(r.json));
@@ -404,7 +405,7 @@ describe('요청 창구 API', () => {
       assert.equal(c.trigger.source_kind, 'request');
       await finish('gamma', c, '결과 확인함 — 마무리 보고');
     } finally {
-      s.setRequestPair(cli, 'gamma', 'gamma', false);
+      s.requests!.setRequestPair(cli, 'gamma', 'gamma', false);
     }
   });
 });
@@ -415,11 +416,11 @@ test('마이그레이션 14 — 스키마 13 의 옛 행 그대로 · source_kin
   db.pragma('foreign_keys = ON');
   migrate(db, 13);
   db.prepare("INSERT INTO participants(id, kind, name, is_master, created_at) VALUES ('master','human','m',1,0)").run();
-  db.prepare("INSERT INTO participants(id, kind, name, created_at) VALUES ('vision','agent','비전',0)").run();
+  db.prepare("INSERT INTO participants(id, kind, name, created_at) VALUES ('agent-b','agent','에이전트B',0)").run();
   db.prepare("INSERT INTO threads(id, title, created_by, created_at, updated_at) VALUES ('th_old','옛','master',0,0)").run();
   db.prepare("INSERT INTO messages(id, thread_id, author_id, client_key, body, source_kind, created_at) VALUES ('m1','th_old','master','k','옛 글','instruction',0)").run();
-  db.prepare("INSERT INTO messages(id, thread_id, author_id, client_key, body, source_kind, reply_to_seq, created_at) VALUES ('m2','th_old','vision','k2','옛 답','proposal',1,0)").run();
-  assert.throws(() => db.prepare("INSERT INTO messages(id, thread_id, author_id, client_key, body, source_kind, created_at) VALUES ('m3','th_old','vision','k3','x','request',0)").run());
+  db.prepare("INSERT INTO messages(id, thread_id, author_id, client_key, body, source_kind, reply_to_seq, created_at) VALUES ('m2','th_old','agent-b','k2','옛 답','proposal',1,0)").run();
+  assert.throws(() => db.prepare("INSERT INTO messages(id, thread_id, author_id, client_key, body, source_kind, created_at) VALUES ('m3','th_old','agent-b','k3','x','request',0)").run());
   const seqBefore = (db.prepare("SELECT seq FROM sqlite_sequence WHERE name = 'messages'").get() as any).seq;
   migrate(db);
   assert.ok(SCHEMA_VERSION >= 14);
@@ -431,9 +432,9 @@ test('마이그레이션 14 — 스키마 13 의 옛 행 그대로 · source_kin
       { id: 'm2', body: '옛 답', source_kind: 'proposal', reply_to_seq: 1 },
     ],
   );
-  db.prepare("INSERT INTO messages(id, thread_id, author_id, client_key, body, source_kind, created_at) VALUES ('m3','th_old','vision','k3','요청','request',0)").run();
+  db.prepare("INSERT INTO messages(id, thread_id, author_id, client_key, body, source_kind, created_at) VALUES ('m3','th_old','agent-b','k3','요청','request',0)").run();
   assert.equal((db.prepare("SELECT seq FROM messages WHERE id = 'm3'").get() as any).seq, seqBefore + 1); // AUTOINCREMENT 이어짐
-  assert.throws(() => db.prepare("INSERT INTO messages(id, thread_id, author_id, client_key, body, source_kind, created_at) VALUES ('m4','th_old','vision','k4','x','bogus',0)").run());
+  assert.throws(() => db.prepare("INSERT INTO messages(id, thread_id, author_id, client_key, body, source_kind, created_at) VALUES ('m4','th_old','agent-b','k4','x','bogus',0)").run());
   assert.equal(db.pragma('integrity_check', { simple: true }), 'ok');
   assert.deepEqual(db.pragma('foreign_key_check'), []);
   assert.deepEqual(
@@ -445,6 +446,6 @@ test('마이그레이션 14 — 스키마 13 의 옛 행 그대로 · source_kin
   db.close();
   // 다시 열어도(새 연결) 넓힌 CHECK 그대로
   const db2 = new Database(path.join(dir, 'x.db'));
-  db2.prepare("INSERT INTO messages(id, thread_id, author_id, client_key, body, source_kind, created_at) VALUES ('m5','th_old','vision','k5','또','request',0)").run();
+  db2.prepare("INSERT INTO messages(id, thread_id, author_id, client_key, body, source_kind, created_at) VALUES ('m5','th_old','agent-b','k5','또','request',0)").run();
   db2.close();
 });

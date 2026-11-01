@@ -15,7 +15,7 @@ describe('하위 스레드 합치기', () => {
   let parent: string;
   let child: string;
   before(async () => {
-    ctx = await setup();
+    ctx = await setup({ modules: ['merge'] });
     parent = await newThread(ctx, '상위', null, ['alpha']);
     const p1 = await post(ctx, parent, '상위 첫 글');
     const f = await ctx.master('POST', `/api/threads/${parent}/fork`, { from_seq: p1.message.seq, title: '하위 논의' });

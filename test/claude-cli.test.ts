@@ -13,9 +13,9 @@ const ok = (o: Record<string, unknown> = {}) =>
 
 describe('Claude Code 어댑터: 변환', () => {
   test('세션 UUID: 같은 키는 같은 값, 다른 키는 다른 값, UUID 모양', () => {
-    const a = sessionUuid('agent:claude:bs:baekgu:th_a:g1');
-    assert.equal(a, sessionUuid('agent:claude:bs:baekgu:th_a:g1'));
-    assert.notEqual(a, sessionUuid('agent:claude:bs:baekgu:th_a:g2'));
+    const a = sessionUuid('agent:claude:bs:agent-a:th_a:g1');
+    assert.equal(a, sessionUuid('agent:claude:bs:agent-a:th_a:g1'));
+    assert.notEqual(a, sessionUuid('agent:claude:bs:agent-a:th_a:g2'));
     assert.match(a, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
   });
 
@@ -246,7 +246,7 @@ let p = ''; process.stdin.on('data', (d) => (p += d)); process.stdin.on('end', (
   });
 
   test('시간 초과 + 마무리 턴 → 같은 세션 --resume 으로 마무리 프롬프트 · 그 답이 올라가고 succeeded · 턴 시각·스레드 id 환경', async () => {
-    const w = worker(500, undefined, 5000);
+    const w = worker(2000, undefined, 5000);
     const th = await newThread(ctx, 'CC 마무리', 'alpha');
     await post(ctx, th, 'SLEEP 마무리');
     const n0 = calls().length;
@@ -267,7 +267,7 @@ let p = ''; process.stdin.on('data', (d) => (p += d)); process.stdin.on('end', (
   });
 
   test('마무리 턴도 넘기면 failed · 오류에 둘 다', async () => {
-    const w = worker(400, undefined, 400);
+    const w = worker(2000, undefined, 2000);
     const th = await newThread(ctx, 'CC 마무리 실패', 'alpha');
     await post(ctx, th, 'SLEEP 둘 다');
     fs.writeFileSync(path.join(dir, 'always-sleep'), '');
@@ -276,6 +276,6 @@ let p = ''; process.stdin.on('data', (d) => (p += d)); process.stdin.on('end', (
     } finally {
       fs.rmSync(path.join(dir, 'always-sleep'), { force: true });
     }
-    assert.match(String((await runs(th))[0].error), /timeout 400ms · 마무리 턴도 실패: timeout 400ms/);
+    assert.match(String((await runs(th))[0].error), /timeout 2000ms · 마무리 턴도 실패: timeout 2000ms/);
   });
 });

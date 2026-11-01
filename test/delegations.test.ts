@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
 import { migrate, SCHEMA_VERSION } from '../src/db.js';
-import { claimsOverlap, normalizeClaim } from '../src/store.js';
+import { claimsOverlap, normalizeClaim } from '../src/modules/delegations/store.js';
 import { newThread, openWs, setup, waitFor, type Ctx } from './helpers.js';
 
 const P = (repo: string, scope: string) => ({ kind: 'path', repo, scope });
@@ -15,7 +15,7 @@ const R = (repo: string, scope: string) => ({ kind: 'resource', repo, scope });
 describe('위임 대장', () => {
   let ctx: Ctx;
   before(async () => {
-    ctx = await setup();
+    ctx = await setup({ modules: ['delegations'] });
   });
   after(async () => ctx.close());
 

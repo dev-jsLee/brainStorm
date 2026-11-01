@@ -8,7 +8,7 @@ Type=simple
 EnvironmentFile=%h/.config/brainstorm/codex.env
 Environment=PATH=%h/.npm-global/bin:%h/.local/bin:/usr/local/bin:/usr/bin:/bin
 WorkingDirectory=%h/workspace
-ExecStart=/usr/bin/node %h/.local/lib/brainstorm-adapter/dist/adapter/codex-cli-adapter.js run
+ExecStart=/usr/bin/env node %h/.local/lib/brainstorm-adapter/dist/adapter/codex-cli-adapter.js run
 Restart=on-failure
 RestartSec=30
 RestartPreventExitStatus=2 4

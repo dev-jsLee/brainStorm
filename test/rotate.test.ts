@@ -28,6 +28,11 @@ describe('어댑터: 이어받은 맥락', () => {
     assert.match(p, /원문 사본 `brainStorm\/설계 \(abc\)\.md`/);
     assert.match(p, /\[사서 요약 — #90 사서\]\n정해진 것: A로 간다/);
   });
+  test('설정 안내(older_hint)가 사전 기본 문구를 대신한다 · {note} 자리에 원문 사본 이름', () => {
+    const p = buildPrompt({ threadTitle: '설계', generation: 2, newMessages: [m(101, 'master', '이어서')], triggerSeq: 101, participants: parts, selfId: 'alpha', carry: { ...carry, older_hint: '보관소 `{note}`를 찾아 읽거나' } });
+    assert.match(p, /필요하면: 보관소 `brainStorm\/설계 \(abc\)\.md`를 찾아 읽거나, 끝줄/);
+    assert.doesNotMatch(p, /원문 사본/);
+  });
   test('openai: 이어받은 맥락은 맨 앞 user 글 · 예산에 쫓겨도 지킨다', () => {
     const msgs = [m(1, 'master', '가'.repeat(3000)), m(101, 'master', '이어서')];
     const r = buildChatMessages({ system: 's', messages: msgs, triggerSeq: 101, selfId: 'alpha', participants: parts as any, contextTokens: 1500, maxTokens: 100, marginTokens: 0, carry });

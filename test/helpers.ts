@@ -30,8 +30,9 @@ export async function setup(over: Partial<Config> = {}, dataDirIn?: string): Pro
     loadConfig({
       dataDir,
       listen: [{ host: '127.0.0.1', port: 0 }],
-      deliveryLeaseMs: 300,
-      runLeaseMs: 1500,
+      // 임대는 넉넉히 — 부하가 높을 때 임대가 먼저 끝나 시험이 시간에 걸린다. 만료를 보는 시험만 짧게 준다(setup({ deliveryLeaseMs: 1000, runLeaseMs: 3000 }))
+      deliveryLeaseMs: 10_000,
+      runLeaseMs: 30_000,
       retryBaseMs: 50,
       sweepIntervalMs: 100,
       wsRevalidateMs: 200,

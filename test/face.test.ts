@@ -39,7 +39,7 @@ describe('대면 — 순수 계산', () => {
     assert.equal(t2.issueOps.length, 0, '초안 줄을 고친 것은 쟁점 아님');
     assert.equal(t2.changed, 2);
     assert.deepEqual(t2.origins[0], { by: 'v', rev: 2 });
-    // 백구가 비전이 고친 줄을 다른 문장으로 → 쟁점(되돌림 아님)
+    // 에이전트A가 에이전트B이 고친 줄을 다른 문장으로 → 쟁점(되돌림 아님)
     const t3 = applyTurn({ ...base, me: 'b', prevDoc: 'X2\nY', prevOrigins: t2.origins, newDoc: 'X3\nY', rev: 3, turn: 3, otherPrevRev: 2 });
     assert.equal(t3.issueOps.length, 1);
     const op = t3.issueOps[0] as Extract<(typeof t3.issueOps)[number], { op: 'new' }>;
@@ -67,22 +67,22 @@ describe('대면 — 순수 계산', () => {
     const parts = new Map([['master', { id: 'master', name: '마스터', kind: 'human' as const, is_master: true }]]);
     const m = { seq: 5, id: 'm5', thread_id: 't', author_id: 'master', body: '지시', source_kind: 'instruction', recipients: [], handoff_to: [] } as unknown as Message;
     const face: ClaimFace = {
-      round_id: 'face_x', turn: 2, role: 'reviewer', other: { id: 'baekgu', name: '백구' }, base_turns: 4, max_turns: 6,
+      round_id: 'face_x', turn: 2, role: 'reviewer', other: { id: 'agent-a', name: '에이전트A' }, base_turns: 4, max_turns: 6,
       doc: 'A\nB', rev: 1, changed_by_other: ['B'], open_issues: [{ n: 1, lines: ['A'] }], resumed_question: null,
     };
-    const p = buildPrompt({ threadTitle: 'T', generation: 1, newMessages: [m], triggerSeq: 5, participants: parts, selfId: 'vision', face });
+    const p = buildPrompt({ threadTitle: 'T', generation: 1, newMessages: [m], triggerSeq: 5, participants: parts, selfId: 'agent-b', face });
     assert.ok(p.includes(FACE_RULE));
-    assert.ok(p.includes('턴 2/4(→6)') && p.includes('너는 검토자') && p.includes('상대: 백구'));
+    assert.ok(p.includes('턴 2/4(→6)') && p.includes('너는 검토자') && p.includes('상대: 에이전트A'));
     assert.ok(p.includes('```합의문\nA\nB\n```'));
     assert.ok(p.includes('> B') && p.includes('⚑ 안건 1'));
-    assert.ok(!buildPrompt({ threadTitle: 'T', generation: 1, newMessages: [m], triggerSeq: 5, participants: parts, selfId: 'vision' }).includes('대면 모드'));
+    assert.ok(!buildPrompt({ threadTitle: 'T', generation: 1, newMessages: [m], triggerSeq: 5, participants: parts, selfId: 'agent-b' }).includes('대면 모드'));
   });
 });
 
 describe('대면 — 서버 흐름', () => {
   let ctx: Ctx;
   before(async () => {
-    ctx = await setup({ faceDrafter: 'alpha', faceReviewer: 'beta' });
+    ctx = await setup({ faceDrafter: 'alpha', faceReviewer: 'beta', modules: ['face'] });
   });
   after(async () => ctx.close());
 
@@ -97,6 +97,8 @@ describe('대면 — 서버 흐름', () => {
     assert.equal(r.status, 200, JSON.stringify(r.json));
     return c;
   }
+  /** claim 뒤 어댑터가 하듯 ack — 안 하면 배달이 leased 로 남아 임대가 끝난 뒤 다음 시험의 claim 에 끼어든다 */
+  const ack = (who: string, c: any) => ctx.agent(who, 'POST', `/api/adapter/deliveries/${c.delivery.id}/ack`, { lease_token: c.delivery.lease_token });
   const face = async (th: string) => (await ctx.master('GET', `/api/threads/${th}/face`)).json;
   const made: string[] = [];
   async function faceThread(title: string) {
@@ -195,6 +197,7 @@ describe('대면 — 서버 흐름', () => {
     assert.deepEqual([f.round.state, f.round.next_agent], ['running', 'beta'], '쟁점이 나와도 진행은 안 멈춘다');
     const c4 = await claim('beta');
     assert.deepEqual(c4.face.open_issues, [{ n: 1, lines: ['X'] }]);
+    await ack('beta', c4);
     await ctx.agent('beta', 'POST', `/api/adapter/runs/${c4.run.id}/start`, { run_token: c4.run.run_token });
     await ctx.agent('beta', 'POST', `/api/adapter/runs/${c4.run.id}/complete`, { run_token: c4.run.run_token, body: doc('X 다시', ['X4', 'Y']) });
     f = await face(th);
@@ -239,6 +242,7 @@ describe('대면 — 서버 흐름', () => {
     f = await face(th);
     assert.deepEqual([f.round.state, f.round.next_agent], ['running', 'beta']);
     const c2 = await claim('beta');
+    await ack('beta', c2);
     await ctx.agent('beta', 'POST', `/api/adapter/runs/${c2.run.id}/start`, { run_token: c2.run.run_token });
     await ctx.agent('beta', 'POST', `/api/adapter/runs/${c2.run.id}/fail`, { run_token: c2.run.run_token, error: 'boom' });
     f = await face(th);
@@ -307,4 +311,15 @@ test('마이그레이션 16 — 스키마 15 의 옛 스레드는 mode=chat · �
   assert.throws(() => db.prepare("UPDATE threads SET mode = 'x' WHERE id = 'th_old'").run(), /CHECK/);
   assert.equal(db.pragma('integrity_check', { simple: true }), 'ok');
   db.close();
+});
+
+test('초안·검토 쪽을 안 정한 배치: 대면 켜기 409 face_not_configured', async () => {
+  const c = await setup({ faceDrafter: '', faceReviewer: '', modules: ['face'] });
+  try {
+    const th = await newThread(c, '대면 미설정', null, ['alpha', 'beta']);
+    const r = await c.master('POST', `/api/threads/${th}/mode`, { mode: 'face' });
+    assert.deepEqual([r.status, r.json.error], [409, 'face_not_configured']);
+  } finally {
+    await c.close();
+  }
 });

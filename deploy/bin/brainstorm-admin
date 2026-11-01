@@ -4,6 +4,6 @@ set -e
 umask 027
 set -a; . /etc/brainstorm/brainstorm.env; set +a
 if [ "$(id -u)" = 0 ]; then
-  exec runuser -u brainstorm -- /usr/bin/node /opt/brainstorm/dist/src/cli.js "$@"
+  exec runuser -u brainstorm -- /usr/bin/env node /opt/brainstorm/dist/src/cli.js "$@"
 fi
-exec /usr/bin/node /opt/brainstorm/dist/src/cli.js "$@"
+exec /usr/bin/env node /opt/brainstorm/dist/src/cli.js "$@"

@@ -56,7 +56,7 @@ export const HELP = `openai-adapter — brainStorm 에이전트를 OpenAI 호환
   --model M                 OPENAI_MODEL              모델 이름 (필수)
   --system-prompt-file F    OPENAI_SYSTEM_PROMPT_FILE 시스템 프롬프트 파일. 없으면 OPENAI_SYSTEM_PROMPT, 없으면 기본 문구
   --handoff-rule            BRAINSTORM_HANDOFF_RULE   넘김·끌어오기 규약 두 줄(«→ 이름» · «← 스레드» 끝줄)을 시스템 프롬프트에 붙인다 (기본 끔 —
-                                                      로컬 모델은 끝줄을 남발할 수 있다. 참여자별로 켠다: 메티 켬 · Strata 끔)
+                                                      로컬 모델은 끝줄을 남발할 수 있다. 참여자별로 켠다)
   --max-tokens N            OPENAI_MAX_TOKENS         답 최대 토큰 (기본 2048)
   --context-tokens N        OPENAI_CONTEXT_TOKENS     모델 컨텍스트 크기 (기본 32768) — 맥락을 이 안에 맞춘다
   --temperature X           OPENAI_TEMPERATURE        (기본: 보내지 않음 = 서버 기본값)

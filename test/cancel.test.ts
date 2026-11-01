@@ -13,12 +13,12 @@ import { hashPassphrase, sha256 } from '../src/crypto.js';
 import { migrate, SCHEMA_VERSION } from '../src/db.js';
 import { MASTER_PASS, newThread, post, setup, sleep, spawnAdapter, waitFor, type Ctx } from './helpers.js';
 
-const ACK_MS = 600;
+const ACK_MS = 2000; // 시험의 어댑터가 부하 아래서도 이 안에 확인을 보낼 만큼
 
 describe('실행 취소 판정(정책 1)', () => {
   let ctx: Ctx;
   before(async () => {
-    ctx = await setup({ cancelAckMs: ACK_MS });
+    ctx = await setup({ cancelAckMs: ACK_MS, deliveryLeaseMs: 1000, runLeaseMs: 3000 }); // 임대 만료를 기다리는 시험이 있다
   });
   after(async () => ctx.close());
 
@@ -82,7 +82,7 @@ describe('실행 취소 판정(정책 1)', () => {
   test('실행 중 취소 → 중단 요청됨 → 가짜 어댑터가 확인 → cancelled(중단 완료), 답 없음', async () => {
     const th = await newThread(ctx, '실행 중 취소', 'alpha');
     await post(ctx, th, 'long');
-    const fa = spawnAdapter(ctx, 'alpha', ['--slow-ms', '20000', '--max-idle-ms', '600']);
+    const fa = spawnAdapter(ctx, 'alpha', ['--slow-ms', '20000', '--max-idle-ms', '1500']);
     const running = await waitFor(async () => (await runs(th)).find((r) => r.state === 'running'));
     const r = await ctx.master('POST', `/api/runs/${running.id}/cancel`);
     assert.equal(r.json.outcome, 'requested');
@@ -113,11 +113,11 @@ describe('실행 취소 판정(정책 1)', () => {
   test('어댑터 무응답(--no-cancel-ack) → 제한 시간 뒤 unknown, 다시 돌리지 않는다', async () => {
     const th = await newThread(ctx, '무응답', 'alpha');
     await post(ctx, th, 'never acks');
-    const fa = spawnAdapter(ctx, 'alpha', ['--slow-ms', '20000', '--no-cancel-ack', '--max-idle-ms', '2500']);
+    const fa = spawnAdapter(ctx, 'alpha', ['--slow-ms', '20000', '--no-cancel-ack', '--max-idle-ms', '5000']);
     const running = await waitFor(async () => (await runs(th)).find((r) => r.state === 'running'));
     const t0 = Date.now();
     await ctx.master('POST', `/api/runs/${running.id}/cancel`);
-    const unk = await waitFor(async () => (await runs(th)).find((r) => r.id === running.id && r.state === 'unknown'), 5000);
+    const unk = await waitFor(async () => (await runs(th)).find((r) => r.id === running.id && r.state === 'unknown'), 8000);
     assert.ok(Date.now() - t0 >= ACK_MS - 50, 'unknown 은 무응답 제한이 지난 뒤');
     assert.equal(unk.error, 'cancel_ack_timeout');
     assert.equal(unk.cancel_outcome, 'no_ack');

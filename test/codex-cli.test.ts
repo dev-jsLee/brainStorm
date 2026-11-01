@@ -47,9 +47,9 @@ describe('Codex 어댑터: 변환', () => {
   });
 
   test('장부 열쇠: 결정적 · 스레드 id 를 그대로 적지 않음', () => {
-    assert.equal(bookKey('agent:codex:bs:vision:th_a:g1'), bookKey('agent:codex:bs:vision:th_a:g1'));
-    assert.notEqual(bookKey('agent:codex:bs:vision:th_a:g1'), bookKey('agent:codex:bs:vision:th_a:g2'));
-    assert.doesNotMatch(bookKey('agent:codex:bs:vision:th_a:g1'), /th_a/);
+    assert.equal(bookKey('agent:codex:bs:agent-b:th_a:g1'), bookKey('agent:codex:bs:agent-b:th_a:g1'));
+    assert.notEqual(bookKey('agent:codex:bs:agent-b:th_a:g1'), bookKey('agent:codex:bs:agent-b:th_a:g2'));
+    assert.doesNotMatch(bookKey('agent:codex:bs:agent-b:th_a:g1'), /th_a/);
   });
 });
 
@@ -80,7 +80,7 @@ let p = ''; process.stdin.on('data', (d) => (p += d)); process.stdin.on('end', (
   out({ type: 'thread.started', thread_id: id });
   if (p.includes('FAIL')) { out({ type: 'turn.failed', error: { message: 'boom' } }); process.exit(1); }
   const go = () => { out({ type: 'item.completed', item: { type: 'agent_message', text: '받음 ' + ((p.match(/▶ #\\d+/) || [''])[0]) } }); out({ type: 'turn.completed', usage: { input_tokens: 5, cached_input_tokens: 2, output_tokens: 1 } }); };
-  if (p.includes('PROGRESS')) { out({ type: 'item.started', item: { type: 'command_execution', command: 'ls' } }); setTimeout(go, 600); }
+  if (p.includes('PROGRESS')) { out({ type: 'item.started', item: { type: 'command_execution', command: 'ls' } }); setTimeout(go, 1500); }
   else if (p.includes('SLEEP')) setTimeout(go, 20000); else go();
 });
 `,
@@ -148,9 +148,9 @@ let p = ''; process.stdin.on('data', (d) => (p += d)); process.stdin.on('end', (
     const th = await newThread(ctx, 'CX 경과', 'alpha');
     await post(ctx, th, 'PROGRESS 보여 줘');
     const p = w.handleOne();
-    await waitFor(async () => (await runs(th)).find((x) => x.state === 'running' && x.progress));
+    // 끝값은 답 앞머리일 수 있다(마지막 박동이 언제 도느냐에 달림) — 도는 동안에 본다
+    await waitFor(async () => (await runs(th)).find((x) => x.state === 'running' && x.progress === '도구 shell — ls'));
     assert.equal(await p, 'succeeded');
-    assert.equal((await runs(th))[0].progress, '도구 shell — ls');
   });
 
   test('codex 실패 → run failed (codex-cli: …)', async () => {

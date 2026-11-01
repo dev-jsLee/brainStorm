@@ -165,7 +165,7 @@ describe('OpenAI 어댑터: 변환', () => {
     assert.equal(r.dropped, 2);
     assert.ok(r.estTokens <= 1300 - 200);
     assert.deepEqual(r.messages.map((m) => m.role), ['system', 'user', 'assistant', 'user']);
-    // 밀려난 옛 대화는 한 줄로 알린다(메티 #158 · 2026-10-13) — 그 뒤에 남은 가장 옛 글(다)
+    // 밀려난 옛 대화는 한 줄로 알린다(에이전트M #158 · 2026-10-13) — 그 뒤에 남은 가장 옛 글(다)
     assert.ok((r.messages[1].content as string).startsWith('(앞 대화 2개는 길이 때문에 빠짐'));
     assert.ok((r.messages[1].content as string).includes('\n\n다'));
     assert.equal((r.messages[3].content as string), '질문');

@@ -8,7 +8,7 @@ import { ADAPTER, key, newThread, post, setup, sleep, spawnAdapter, waitFor, typ
 describe('실행', () => {
   let ctx: Ctx;
   before(async () => {
-    ctx = await setup();
+    ctx = await setup({ deliveryLeaseMs: 1000, runLeaseMs: 3000 }); // 임대 만료를 기다리는 시험이 있다
   });
   after(async () => ctx.close());
 

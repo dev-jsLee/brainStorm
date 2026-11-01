@@ -434,7 +434,7 @@ export class OpenAIWorker {
           sent: built.used,
           dropped: built.dropped,
           trigger_truncated: built.truncatedTrigger || undefined,
-          pulled_truncated: built.truncatedPulled || undefined, // 가져온 묶음 가운데가 잘림(메티 #175 — 지표·화면에 보이게)
+          pulled_truncated: built.truncatedPulled || undefined, // 가져온 묶음 가운데가 잘림(#175 — 지표·화면에 보이게)
           est_tokens: built.estTokens,
           budget_tokens: built.budgetTokens,
         },
@@ -446,7 +446,7 @@ export class OpenAIWorker {
           run_token: runToken,
           body,
           source_kind: 'proposal', // 에이전트 답은 지시가 아니다
-          // 전달·끌어오기 실행: 여기까지 보냈다. 예산으로 옛 대화가 밀려났으면 되돌리지 않는다 — 서버가 원인까지만 본 것으로 친다(메티 #175)
+          // 전달·끌어오기 실행: 여기까지 보냈다. 예산으로 옛 대화가 밀려났으면 되돌리지 않는다 — 서버가 원인까지만 본 것으로 친다(#175)
           context_upto_seq: built.pushedOut ? undefined : (claim.forward?.context_upto_seq ?? claim.pulled?.context_upto_seq),
           runtime: 'openai-compat',
           model: r.model ?? undefined, // 서버가 알려 준 값만. 없으면 비운다(설정값으로 채우지 않는다)

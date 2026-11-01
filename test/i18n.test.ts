@@ -10,7 +10,7 @@ import { parseFaceAnswer } from '../src/face.js';
 import { languages, t } from '../src/i18n.js';
 import type { Message } from '../src/protocol.js';
 import { renderFace, requestRule } from '../src/protocol.js';
-import { parseHold, parseRequest } from '../src/store.js';
+import { parseHold, parseRequest } from '../src/modules/requests/store.js';
 import { newThread, post, setup, waitFor, type Ctx } from './helpers.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -81,7 +81,7 @@ describe('프롬프트 틀이 그 언어로', () => {
 describe('서버 언어 설정', () => {
   let ctx: Ctx;
   before(async () => {
-    ctx = await setup();
+    ctx = await setup({ modules: ['requests'] });
   });
   after(async () => {
     await ctx.close();

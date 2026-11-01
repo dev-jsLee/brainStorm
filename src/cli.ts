@@ -3,6 +3,7 @@
 // 토큰 원문은 발급할 때 한 번만 표준출력으로 나온다. DB에는 해시만.
 // 이 CLI 로 한 민감 작업(토큰 발급·폐기, 참여자 등록, 멤버 변경, 세션 교체, 웹 세션 …)은 작업자 'cli:root' 로 감사 기록에 남는다.
 import fs from 'node:fs';
+import { RequestStore } from './modules/requests/store.js';
 import { backup, restore } from './backup.js';
 import { loadConfig } from './config.js';
 import { generatePassphrase } from './crypto.js';
@@ -11,7 +12,7 @@ import { CLI_ACTOR, Store, type Principal } from './store.js';
 
 const USAGE = `brainstorm-admin <명령>
 
-  init [--master-id ID] [--master-name 이름]
+  init [--master-id ID] [--master-name 이름(없으면 BRAINSTORM_MASTER_NAME)]
         DB를 만들고 마스터를 등록한다. 패스프레이즈를 새로 만들어 «표준출력으로만» 낸다
         (배포 스크립트가 root 전용 파일로 돌린다). 이미 있으면 아무것도 안 한다.
   set-passphrase            표준입력 첫 줄을 마스터 패스프레이즈로 (12자 이상). 기존 웹 세션은 끊긴다
@@ -97,7 +98,7 @@ async function main() {
           process.exit(3);
         }
         const id = flag(args, '--master-id') ?? 'master';
-        const name = flag(args, '--master-name') ?? 'master';
+        const name = flag(args, '--master-name') ?? (process.env.BRAINSTORM_MASTER_NAME || 'master');
         store.createParticipant(id, 'human', name, true);
         const pass = generatePassphrase();
         store.setPassphrase(id, pass);
@@ -186,9 +187,9 @@ async function main() {
         break;
       }
       case 'request-pair':
-        if (sub === 'list') out(store.listRequestPairs());
+        if (sub === 'list') out(new RequestStore(store).listRequestPairs());
         else if (sub === 'add' || sub === 'remove')
-          out(store.setRequestPair(masterPrincipal(), need(flag(args, '--from'), '--from'), need(flag(args, '--to'), '--to'), sub === 'add'));
+          out(new RequestStore(store).setRequestPair(masterPrincipal(), need(flag(args, '--from'), '--from'), need(flag(args, '--to'), '--to'), sub === 'add'));
         else throw new Error(USAGE);
         break;
       case 'thread':

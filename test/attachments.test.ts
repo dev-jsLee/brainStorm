@@ -29,7 +29,7 @@ describe('첨부: 형식 판별', () => {
 describe('첨부: 업로드 → 메시지에 묶기', () => {
   let ctx: Ctx;
   before(async () => {
-    ctx = await setup({ attachmentMaxBytes: 4096, uploadTtlMs: 400 });
+    ctx = await setup({ attachmentMaxBytes: 4096, uploadTtlMs: 3000 });
   });
   after(() => ctx.close());
 
@@ -119,7 +119,7 @@ describe('첨부: 업로드 → 메시지에 묶기', () => {
     const th = await newThread(ctx, '만료', null);
     const u = await upload('old.txt', Buffer.from('old'));
     const id = u.json.upload.id;
-    await sleep(600);
+    await sleep(3200);
     await upload('new.txt', Buffer.from('new')); // 걷기는 새 업로드 때도 돈다
     assert.ok(!fs.existsSync(path.join(ctx.cfg.attachmentsDir, id)));
     const r = await ctx.master('POST', `/api/threads/${th}/messages`, { client_key: key(), body: 'x', attachments: [id] });

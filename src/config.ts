@@ -1,4 +1,5 @@
 // 설정은 전부 환경 변수로 받는다. 배포에서는 /etc/brainstorm/brainstorm.env 가 채운다.
+import { parseModules } from './modules.js';
 import path from 'node:path';
 
 export interface Config {
@@ -36,6 +37,8 @@ export interface Config {
   rotateTokens: number;
   rotateReplies: number;
   carryMessages: number;
+  /** 옛 대화를 읽는 길 안내 — 비면 사전 기본 문구. `{note}` 자리에 원문 사본 이름 */
+  carryHint: string;
   maxCallBudget: number;
   /** 요청 연쇄 상한(마스터 #352) — 스레드의 마지막 마스터 글 뒤 요청 글이 이 수에 닿으면 다음 요청은 만들지 않고 «마스터 확인 필요»로 남긴다 */
   requestChainMax: number;
@@ -52,6 +55,8 @@ export interface Config {
   faceMaxTurns: number;
   /** 기본 언어(마스터 #823) — 마스터가 화면에서 언어를 고르기 전까지 서버 안내·에이전트 규약이 쓰는 언어. 고르면 DB(meta `lang`)가 앞선다 */
   lang: string;
+  /** 켠 선택 모듈(마스터 #1193 · docs/MODULES.md) — BRAINSTORM_MODULES · 비면 core 만 */
+  modules: string[];
 }
 
 function int(name: string, def: number): number {
@@ -126,6 +131,7 @@ export function loadConfig(over: Partial<Config> = {}): Config {
     rotateTokens: int('BRAINSTORM_ROTATE_TOKENS', 150_000),
     rotateReplies: int('BRAINSTORM_ROTATE_REPLIES', 10),
     carryMessages: int('BRAINSTORM_CARRY_MESSAGES', 12),
+    carryHint: process.env.BRAINSTORM_CARRY_HINT ?? '',
     maxCallBudget: int('BRAINSTORM_MAX_CALL_BUDGET', 10),
     requestChainMax: int('BRAINSTORM_REQUEST_CHAIN_MAX', 6),
     sweepIntervalMs: int('BRAINSTORM_SWEEP_INTERVAL_MS', 1_000),
@@ -138,6 +144,7 @@ export function loadConfig(over: Partial<Config> = {}): Config {
     faceBaseTurns: int('BRAINSTORM_FACE_BASE_TURNS', 4),
     faceMaxTurns: int('BRAINSTORM_FACE_MAX_TURNS', 6),
     lang: process.env.BRAINSTORM_LANG || 'ko',
+    modules: parseModules(process.env.BRAINSTORM_MODULES),
   };
   const merged = { ...cfg, ...over };
   if (over.dataDir) {
