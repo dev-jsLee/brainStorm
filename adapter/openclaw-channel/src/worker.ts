@@ -74,6 +74,8 @@ export interface WorkerOptions {
   pollMs?: number;
   /** 동시에 도는 턴 수(칸). 기본 1 — 칸마다 따로 claim 한다 */
   concurrency?: number;
+  /** claim 전에 묻는다 — false 면 이번 박자는 claim 하지 않고 쉰다(전달은 서버 큐에 남는다). herdr 어댑터: 창이 바쁘면 false */
+  canClaim?: () => Promise<boolean>;
   heartbeatMs?: number;
   /** 시험용: 턴이 끝난 뒤(LLM 호출 뒤) 답을 올리기 전에 부른다 */
   beforeComplete?: (runId: string) => Promise<void> | void;
@@ -247,6 +249,7 @@ export class BrainstormWorker {
 
   /** 전달 하나를 처리한다. 결과 종류를 돌려준다(시험이 본다) */
   async handleOne(stop?: AbortSignal): Promise<HandleOutcome> {
+    if (this.o.canClaim && !(await this.o.canClaim())) return 'idle';
     const c = await this.client.call<{ claim: Claim | null }>('POST', '/api/adapter/claim', { worker: this.o.worker });
     const claim = c.claim;
     if (!claim) return 'idle';

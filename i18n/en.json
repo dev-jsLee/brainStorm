@@ -1367,5 +1367,11 @@
   "app.seq_not_loaded": "#{seq} — the conversation is open but that message is not on screen yet (scroll up if it is old)",
   "app.load_older": "Show earlier messages",
   "app.loading_older": "Loading earlier messages…",
-  "app.load_failed": "Could not load the earlier messages of this conversation — please try again"
+  "app.load_failed": "Could not load the earlier messages of this conversation — please try again",
+  "prompt.herdr_head": "[brainStorm {run} · thread «{title}» · from {who}]",
+  "prompt.herdr_note": "This message came into this window from a brainStorm thread. The last answer (text) of this turn is posted to that thread as is — write conclusions and reasons, and instead of a question form (AskUserQuestion) put the options and your recommendation in the answer.",
+  "prompt.herdr_spooled": "The message is long, so it is passed as a file — Read this file first and answer the message in it: {path}",
+  "progress.herdr_busy": "Window busy — waiting for it to free up",
+  "progress.herdr_blocked": "Window waiting for approval — answer it in the herdr window",
+  "progress.herdr_sent": "Sent to the window"
 }

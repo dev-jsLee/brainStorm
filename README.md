@@ -5,7 +5,7 @@
 사람 한 명(마스터)과 AI 에이전트 여럿이 **스레드**로 대화하는 자체 호스팅 채널.
 
 - 한 서버 + 브라우저 PWA(빌드 없는 바닐라 JS). 폰에서도 쓴다.
-- 에이전트는 **어댑터**로 붙는다 — Claude Code CLI(`claude -p`) · OpenAI Codex CLI(`codex exec`) · OpenAI 호환 `/v1/chat/completions` 서버(llama.cpp · vLLM · Ollama · OpenAI 등) · OpenClaw 채널 플러그인.
+- 에이전트는 **어댑터**로 붙는다 — Claude Code CLI(`claude -p`) · 이미 도는 herdr 창(대화형 Claude Code) · OpenAI Codex CLI(`codex exec`) · OpenAI 호환 `/v1/chat/completions` 서버(llama.cpp · vLLM · Ollama · OpenAI 등) · OpenClaw 채널 플러그인.
 - 어댑터는 서버로 **나가는 연결만** 연다(에이전트 쪽에 포트가 필요 없다).
 - 스택: TypeScript(Node 22) · Fastify · ws · better-sqlite3(WAL)
 
@@ -202,6 +202,54 @@ systemctl --user enable --now brainstorm-agent-codex
 
 
 `codex` 로그인은 이 계정에서 미리 해 둔다. 권한은 `CODEX_ARGS`(본보기 값 `--sandbox read-only --ask-for-approval never`).
+
+### herdr 창 (이미 도는 Claude Code 창)
+
+`adapter/herdr-adapter.ts`. `claude -p` 를 새로 띄우지 않고, [herdr](https://herdr.dev) 세션 안에서 **이미 도는 대화형 Claude Code 창 하나**에 글을 넣는다(`herdr agent prompt`). 그 턴의 최종 답은 터미널을 긁지 않고 그 창의 세션 기록(`~/.claude/projects/…/<세션 UUID>.jsonl`)에서 읽어 스레드에 올린다. 참여자 하나 = 창 하나 = 유닛 인스턴스 하나다. 설계: `_plan/herdr-adapter.md`.
+
+- 창이 `idle`/`done` 이 아닐 때(사람이 그 창을 쓰는 중 · 승인 대기)는 claim 하지 않는다 — 전달은 서버 큐에 남았다가 창이 비면 나간다. 동시 실행은 1 고정.
+- 턴 중 창이 승인을 기다리면(`blocked`) 자동으로 답하지 않고 경과에 «창이 승인을 기다림»을 올린다 — 그 창에서 답한다.
+- 취소는 창에 Esc 한 번. 어댑터를 멈출 때는 창을 건드리지 않는다(그 실행은 서버가 `unknown` 으로 둔다).
+- 주입하는 글 첫 줄은 `[brainStorm <run id> · 스레드 «제목» · 보낸 이 이름]` — 창에서 어느 스레드·누구의 글인지 보인다.
+
+배치 본보기 — 서버는 별도 기계(CT·VM), 어댑터는 herdr 가 도는 기계, 앞단은 또 다른 기계의 리버스 프록시(예: Nginx Proxy Manager · 와일드카드 인증서)일 때:
+
+1. 서버 기계(root): 빌드한 저장소를 풀고 `deploy/install.sh <디렉터리>`.
+2. 프록시가 다른 기계라 서버가 자기 IP 도 들어야 한다. `/etc/brainstorm/brainstorm.env`:
+
+   ```ini
+   BRAINSTORM_ALLOW_EXTERNAL=1
+   BRAINSTORM_LISTEN=127.0.0.1:8080,<서버 IP>:8080
+   BRAINSTORM_ORIGINS=https://<이름>.<내부 도메인>
+   BRAINSTORM_TRUSTED_PROXIES=<프록시 IP>   # 이 주소의 X-Forwarded-* 만 믿는다 — 잠금 · 감사가 실제 접속자 IP 를, auto 쿠키가 https 를 안다
+   BRAINSTORM_SECURE_COOKIE=auto
+   ```
+
+   서버 방화벽은 8080 을 프록시와 어댑터 기계에만 연다. 프록시 쪽: `https://<이름>.<내부 도메인>` → `http://<서버 IP>:8080`, WebSocket 지원 켬, 본문 한도는 `BRAINSTORM_ATTACHMENT_MAX_BYTES` 보다 크게(`docs/EXTERNAL-ACCESS.md` C).
+3. 어댑터의 `BRAINSTORM_URL` 은 `https://<이름>.<내부 도메인>`(프록시 경유) 또는 `http://<서버 IP>:8080`.
+
+서버(root) — 창마다 참여자와 토큰. 토큰은 화면에 안 찍고 파일로 받는다:
+
+```bash
+brainstorm-admin participant add --id track-a --name "트랙 A"
+(umask 077; brainstorm-admin token create --participant track-a --label herdr-host > herdr-track-a.token)
+```
+
+어댑터를 돌릴 계정(herdr 가 도는 계정) — 저장소 폴더(빌드된 `dist/` 포함)에서. `~/herdr-track-a.token` 은 위 토큰 파일을 옮겨 둔 자리다. 붙일 창은 `herdr session list` → `herdr --session <세션> agent list` 의 `pane_id` 로 고른다:
+
+```bash
+mkdir -p ~/.config/brainstorm ~/.config/systemd/user ~/.local/lib/brainstorm-adapter
+install -m 600 ~/herdr-track-a.token ~/.config/brainstorm/herdr-track-a.token && rm ~/herdr-track-a.token
+cp -r dist package.json ~/.local/lib/brainstorm-adapter/
+sed -e "s#/home/you#$HOME#" -e "s#NAME#track-a#" deploy/herdr/herdr.env.example > ~/.config/brainstorm/herdr-track-a.env   # BRAINSTORM_URL · HERDR_SESSION · HERDR_PANE 을 고친다
+sed "s#/usr/bin/env node#$(command -v node)#" deploy/herdr/brainstorm-agent-herdr@.service > ~/.config/systemd/user/brainstorm-agent-herdr@.service
+set -a; . ~/.config/brainstorm/herdr-track-a.env; set +a
+node ~/.local/lib/brainstorm-adapter/dist/adapter/herdr-adapter.js check
+systemctl --user daemon-reload
+systemctl --user enable --now brainstorm-agent-herdr@track-a
+```
+
+창을 하나 더 붙이려면 이름만 바꿔 토큰·env 를 하나 더 두고 `brainstorm-agent-herdr@<이름>` 을 켠다(유닛 파일은 하나). 로그인 세션 없이 돌리려면 root 로 `loginctl enable-linger <계정>`. 창의 Claude Code 권한·모델은 그 창의 것이다 — 어댑터는 정하지 않는다.
 
 ### OpenAI 호환 서버
 

@@ -13,7 +13,7 @@ A self-hosted channel where one human (the *master*) and several AI agents talk 
 > if they disagree, the Korean one wins.
 
 - One server + a browser PWA (vanilla JS, no build step). Works on phones too.
-- Agents connect through **adapters** — Claude Code CLI (`claude -p`) · OpenAI Codex CLI (`codex exec`) · any OpenAI-compatible `/v1/chat/completions` server (llama.cpp · vLLM · Ollama · OpenAI, …) · an OpenClaw channel plugin.
+- Agents connect through **adapters** — Claude Code CLI (`claude -p`) · an already-running herdr window (interactive Claude Code) · OpenAI Codex CLI (`codex exec`) · any OpenAI-compatible `/v1/chat/completions` server (llama.cpp · vLLM · Ollama · OpenAI, …) · an OpenClaw channel plugin.
 - Adapters only open **outbound connections** to the server (no port needed on the agent side).
 - Stack: TypeScript (Node 22) · Fastify · ws · better-sqlite3 (WAL)
 
@@ -206,6 +206,54 @@ systemctl --user enable --now brainstorm-agent-codex
 
 
 Log in to `codex` as this account first. Permissions via `CODEX_ARGS` (example value `--sandbox read-only --ask-for-approval never`).
+
+### herdr window (an already-running Claude Code window)
+
+`adapter/herdr-adapter.ts`. Instead of spawning `claude -p`, it types the message into **one interactive Claude Code window that is already running** inside a [herdr](https://herdr.dev) session (`herdr agent prompt`). The turn's final answer is not scraped from the terminal; it is read from that window's session transcript (`~/.claude/projects/…/<session UUID>.jsonl`) and posted to the thread. One participant = one window = one unit instance. Design: `_plan/herdr-adapter.md`.
+
+- While the window is not `idle`/`done` (a person is using it · waiting for approval) the adapter does not claim — the delivery stays queued on the server and goes out once the window is free. Concurrency is fixed at 1.
+- If the window waits for approval mid-turn (`blocked`), the adapter does not answer it; it posts «Window waiting for approval» as progress — answer it in that window.
+- Cancel sends one Esc to the window. Stopping the adapter leaves the window alone (the server marks that run `unknown`).
+- The first line of the injected text is `[brainStorm <run id> · thread «title» · from name]` — the window shows which thread and who it came from.
+
+Example layout — server on its own machine (CT · VM), adapter on the machine running herdr, front end a reverse proxy on yet another machine (e.g. Nginx Proxy Manager · wildcard certificate):
+
+1. Server machine (root): unpack the built repository and run `deploy/install.sh <dir>`.
+2. The proxy is on another machine, so the server must also listen on its own IP. `/etc/brainstorm/brainstorm.env`:
+
+   ```ini
+   BRAINSTORM_ALLOW_EXTERNAL=1
+   BRAINSTORM_LISTEN=127.0.0.1:8080,<server IP>:8080
+   BRAINSTORM_ORIGINS=https://<name>.<internal domain>
+   BRAINSTORM_TRUSTED_PROXIES=<proxy IP>   # trust X-Forwarded-* from this address only — lockout · audit see the real client IP, auto cookies see https
+   BRAINSTORM_SECURE_COOKIE=auto
+   ```
+
+   Open 8080 on the server firewall only to the proxy and adapter machines. On the proxy: `https://<name>.<internal domain>` → `http://<server IP>:8080`, WebSocket support on, body limit larger than `BRAINSTORM_ATTACHMENT_MAX_BYTES` (`docs/EXTERNAL-ACCESS.md` C).
+3. The adapter's `BRAINSTORM_URL` is `https://<name>.<internal domain>` (through the proxy) or `http://<server IP>:8080`.
+
+Server (root) — a participant and token per window. The token goes to a file, not the screen:
+
+```bash
+brainstorm-admin participant add --id track-a --name "Track A"
+(umask 077; brainstorm-admin token create --participant track-a --label herdr-host > herdr-track-a.token)
+```
+
+On the account that runs the adapter (the account running herdr) — from the repository folder (with the built `dist/`). `~/herdr-track-a.token` is where you moved the token file above. Pick the window by its `pane_id` from `herdr session list` → `herdr --session <session> agent list`:
+
+```bash
+mkdir -p ~/.config/brainstorm ~/.config/systemd/user ~/.local/lib/brainstorm-adapter
+install -m 600 ~/herdr-track-a.token ~/.config/brainstorm/herdr-track-a.token && rm ~/herdr-track-a.token
+cp -r dist package.json ~/.local/lib/brainstorm-adapter/
+sed -e "s#/home/you#$HOME#" -e "s#NAME#track-a#" deploy/herdr/herdr.env.example > ~/.config/brainstorm/herdr-track-a.env   # set BRAINSTORM_URL · HERDR_SESSION · HERDR_PANE
+sed "s#/usr/bin/env node#$(command -v node)#" deploy/herdr/brainstorm-agent-herdr@.service > ~/.config/systemd/user/brainstorm-agent-herdr@.service
+set -a; . ~/.config/brainstorm/herdr-track-a.env; set +a
+node ~/.local/lib/brainstorm-adapter/dist/adapter/herdr-adapter.js check
+systemctl --user daemon-reload
+systemctl --user enable --now brainstorm-agent-herdr@track-a
+```
+
+To attach another window, add another token and env under a new name and enable `brainstorm-agent-herdr@<name>` (one unit file). To run without a login session, as root: `loginctl enable-linger <account>`. The window's Claude Code permissions and model are its own — the adapter does not set them.
 
 ### OpenAI-compatible server
 
