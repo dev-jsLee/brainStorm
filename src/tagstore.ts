@@ -21,6 +21,10 @@ export interface Tag {
   created_at: number;
   updated_at: number;
   archived_at: number | null;
+  /** 숨김(마이그레이션 21) — 목록·고르개·자동완성·답장 상속에서 빠진다 · 인식·태그 방·글쓰기는 그대로 */
+  hidden_at: number | null;
+  /** 휴지통(마이그레이션 21) — 인식이 멈춘다 · 글 연결은 지킨다 · 되살리기 / 영구 삭제 */
+  deleted_at: number | null;
   /** 마지막 부름 — 이 태그가 주 태그로 붙은 글의 가장 늦은 created_at(휴지통 스레드 제외 · 없으면 null) · 사양 6절 D10 */
   last_called_at: number | null;
 }
@@ -63,16 +67,23 @@ export class TagStore {
       created_at: r.created_at as number,
       updated_at: r.updated_at as number,
       archived_at: (r.archived_at as number) ?? null,
+      hidden_at: (r.hidden_at as number) ?? null,
+      deleted_at: (r.deleted_at as number) ?? null,
       last_called_at: (r.last_called_at as number) ?? null,
     };
   }
 
-  /** 목록 — 인증된 누구나. 기본은 살아 있는 것만 · `archived=1` 이면 보관도 */
-  list(includeArchived = false): Tag[] {
+  /** 목록 — 인증된 누구나. 기본은 살아 있는 것만(보관·숨김·휴지통 뺌) · `archived`·`hidden`·`trash` 를 켜면 그것도 */
+  list(include: boolean | { archived?: boolean; hidden?: boolean; trash?: boolean } = false): Tag[] {
+    const inc = typeof include === 'boolean' ? { archived: include } : include;
     const def = this.defaultAgent();
+    const where: string[] = [];
+    if (!inc.archived) where.push('t.archived_at IS NULL');
+    if (!inc.hidden) where.push('t.hidden_at IS NULL');
+    if (!inc.trash) where.push('t.deleted_at IS NULL');
     // 거리 순(사양 6절 D10 · 마스터 #1510): 최근에 부른 태그가 먼저 · 한 번도 안 부른 태그는 끝에 이름 순
     const rows = this.s.db
-      .prepare(`SELECT t.*, ${LAST_CALLED} AS last_called_at FROM tags t ${includeArchived ? '' : 'WHERE t.archived_at IS NULL'}
+      .prepare(`SELECT t.*, ${LAST_CALLED} AS last_called_at FROM tags t ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
                 ORDER BY last_called_at IS NULL, last_called_at DESC, t.name`)
       .all() as Row[];
     return rows.map((r) => this.toTag(r, def));
@@ -83,9 +94,9 @@ export class TagStore {
     return r ? this.toTag(r, this.defaultAgent()) : null;
   }
 
-  /** 파서에 주는 등록 이름 집합 — 살아 있는 태그만(보관한 태그는 글자로 남는다 · 사양 5절) */
+  /** 파서에 주는 등록 이름 집합 — 살아 있는 태그만(보관·휴지통 태그는 글자로 남는다 · 사양 5절 · 숨긴 태그는 인식된다) */
   knownNames(): Set<string> {
-    return new Set((this.s.db.prepare('SELECT name FROM tags WHERE archived_at IS NULL').all() as Row[]).map((r) => r.name as string));
+    return new Set((this.s.db.prepare('SELECT name FROM tags WHERE archived_at IS NULL AND deleted_at IS NULL').all() as Row[]).map((r) => r.name as string));
   }
 
   private normName(v: unknown): string {
@@ -107,9 +118,12 @@ export class TagStore {
     this.s.requireMaster(pr, 'tag.create');
     const name = this.normName(input.name);
     const owner = this.ownerOf(input.owner_id);
-    const dup = this.s.db.prepare('SELECT id FROM tags WHERE name = ?').get(name) as Row | undefined;
+    const dup = this.s.db.prepare('SELECT id, deleted_at FROM tags WHERE name = ?').get(name) as Row | undefined;
     if (dup) {
-      this.s.audit({ actor: this.s.actorOf(pr), action: 'tag.create', target_type: 'tag', target_id: dup.id as string, result: 'denied', reason: 'tag_exists' });
+      const code = dup.deleted_at ? 'tag_in_trash' : 'tag_exists';
+      this.s.audit({ actor: this.s.actorOf(pr), action: 'tag.create', target_type: 'tag', target_id: dup.id as string, result: 'denied', reason: code });
+      // 휴지통에 같은 이름이 있으면 되살리거나 영구 삭제한 뒤 만든다
+      if (dup.deleted_at) throw new ApiError(409, 'tag_in_trash', undefined, { tag_id: dup.id });
       throw new ApiError(409, 'tag_exists', `tag #${name} exists`, { tag_id: dup.id });
     }
     const id = newId('tg');
@@ -121,11 +135,12 @@ export class TagStore {
     return tag;
   }
 
-  /** 고치기 — 이름·담당자(`owner_id: null` 이면 대표를 따름)·보관(`archived: true|false`). 마스터만 */
-  update(pr: Principal, id: string, input: { name?: unknown; owner_id?: unknown; archived?: unknown }): Tag {
+  /** 고치기 — 이름·담당자(`owner_id: null` 이면 대표를 따름)·보관(`archived: true|false`)·숨김(`hidden: true|false`). 마스터만 · 휴지통 것은 409 */
+  update(pr: Principal, id: string, input: { name?: unknown; owner_id?: unknown; archived?: unknown; hidden?: unknown }): Tag {
     this.s.requireMaster(pr, 'tag.update', { target_type: 'tag', target_id: id });
     const cur = this.get(id);
     if (!cur) throw new ApiError(404, 'not_found');
+    if (cur.deleted_at) throw new ApiError(409, 'tag_in_trash');
     const sets: string[] = [];
     const vals: unknown[] = [];
     const after: Record<string, unknown> = {};
@@ -150,6 +165,13 @@ export class TagStore {
       vals.push(at);
       after.archived_at = at;
     }
+    if (input.hidden !== undefined) {
+      if (typeof input.hidden !== 'boolean') throw new ApiError(400, 'bad_request', 'hidden must be boolean');
+      const at = input.hidden ? (cur.hidden_at ?? now()) : null;
+      sets.push('hidden_at = ?');
+      vals.push(at);
+      after.hidden_at = at;
+    }
     if (sets.length === 0) throw new ApiError(400, 'bad_request', 'nothing to update');
     const t = now();
     this.s.db.prepare(`UPDATE tags SET ${sets.join(', ')}, updated_at = ? WHERE id = ?`).run(...vals, t, id);
@@ -162,11 +184,63 @@ export class TagStore {
       target_id: id,
       result: changed ? 'ok' : 'noop',
       reason: changed ? null : 'unchanged',
-      before: { name: cur.name, owner_id: cur.owner_id, archived_at: cur.archived_at },
+      before: { name: cur.name, owner_id: cur.owner_id, archived_at: cur.archived_at, hidden_at: cur.hidden_at },
       after,
     });
     if (changed) this.s.emit({ notice: { t: 'tag', tag_id: id }, threadId: null });
     return tag;
+  }
+
+  private links(id: string): number {
+    return (this.s.db.prepare('SELECT COUNT(*) AS n FROM message_tags WHERE tag_id = ?').get(id) as Row).n as number;
+  }
+
+  /** 휴지통으로(마스터만) — 인식이 멈추고(새 글의 #이름 은 글자) 글 연결은 지킨다. 이미 휴지통이면 noop */
+  trash(pr: Principal, id: string): Tag {
+    this.s.requireMaster(pr, 'tag.trash', { target_type: 'tag', target_id: id });
+    const cur = this.get(id);
+    if (!cur) throw new ApiError(404, 'not_found');
+    if (!cur.deleted_at) this.s.db.prepare('UPDATE tags SET deleted_at = ?, updated_at = ? WHERE id = ?').run(now(), now(), id);
+    this.s.audit({ actor: this.s.actorOf(pr), action: 'tag.trash', target_type: 'tag', target_id: id, result: cur.deleted_at ? 'noop' : 'ok', reason: cur.deleted_at ? 'unchanged' : null, before: { name: cur.name, deleted_at: cur.deleted_at }, after: { links: this.links(id) } });
+    if (!cur.deleted_at) this.s.emit({ notice: { t: 'tag', tag_id: id }, threadId: null });
+    return this.get(id)!;
+  }
+
+  /** 휴지통에서 되살리기(마스터만) — 보관·숨김 상태는 버리기 전 그대로 */
+  restore(pr: Principal, id: string): Tag {
+    this.s.requireMaster(pr, 'tag.restore', { target_type: 'tag', target_id: id });
+    const cur = this.get(id);
+    if (!cur) throw new ApiError(404, 'not_found');
+    if (cur.deleted_at) this.s.db.prepare('UPDATE tags SET deleted_at = NULL, updated_at = ? WHERE id = ?').run(now(), id);
+    this.s.audit({ actor: this.s.actorOf(pr), action: 'tag.restore', target_type: 'tag', target_id: id, result: cur.deleted_at ? 'ok' : 'noop', reason: cur.deleted_at ? null : 'unchanged', before: { name: cur.name, deleted_at: cur.deleted_at } });
+    if (cur.deleted_at) this.s.emit({ notice: { t: 'tag', tag_id: id }, threadId: null });
+    return this.get(id)!;
+  }
+
+  /**
+   * 영구 삭제(마스터만 · 휴지통 것만 — 아니면 409 not_in_trash) — 되돌릴 수 없다. 글 연결(message_tags)과 태그 행을 지우고,
+   * 그 태그 차선의 쉬는 세션(도는 실행 없음)은 은퇴시킨다. 글 본문은 그대로 · 같은 이름을 새로 만들 수 있다.
+   */
+  purge(pr: Principal, id: string): { ok: true; name: string; links: number; sessions_retired: number } {
+    this.s.requireMaster(pr, 'tag.purge', { target_type: 'tag', target_id: id });
+    const cur = this.get(id);
+    if (!cur) throw new ApiError(404, 'not_found');
+    if (!cur.deleted_at) throw new ApiError(409, 'not_in_trash');
+    const out = this.s.db.transaction(() => {
+      const links = this.s.db.prepare('DELETE FROM message_tags WHERE tag_id = ?').run(id).changes;
+      const t = now();
+      const retired = this.s.db
+        .prepare(
+          `UPDATE agent_sessions SET status = 'retired', ended_at = ?, reason = 'tag_purged'
+           WHERE lane = ? AND status = 'active' AND NOT EXISTS (SELECT 1 FROM runs r WHERE r.session_id = agent_sessions.id AND r.state IN ('queued','running'))`,
+        )
+        .run(t, id).changes;
+      this.s.db.prepare('DELETE FROM tags WHERE id = ?').run(id);
+      return { links, retired };
+    })();
+    this.s.audit({ actor: this.s.actorOf(pr), action: 'tag.purge', target_type: 'tag', target_id: id, result: 'ok', before: { name: cur.name, created_at: cur.created_at, deleted_at: cur.deleted_at }, after: { links: out.links, sessions_retired: out.retired } });
+    this.s.emit({ notice: { t: 'tag', tag_id: id }, threadId: null });
+    return { ok: true, name: cur.name, links: out.links, sessions_retired: out.retired };
   }
 
   // ───────── 글에 붙은 태그 (message_tags) ─────────
@@ -174,7 +248,7 @@ export class TagStore {
   /** 이름 → id (살아 있는 태그만) */
   private aliveByName(): Map<string, string> {
     const m = new Map<string, string>();
-    for (const r of this.s.db.prepare('SELECT id, name FROM tags WHERE archived_at IS NULL').all() as Row[]) m.set(r.name as string, r.id as string);
+    for (const r of this.s.db.prepare('SELECT id, name FROM tags WHERE archived_at IS NULL AND deleted_at IS NULL').all() as Row[]) m.set(r.name as string, r.id as string);
     return m;
   }
 
@@ -192,7 +266,8 @@ export class TagStore {
       for (const x of explicit as string[]) {
         const id = alive.get(x.replace(/^#/, '')) ?? (alive.has(x) ? alive.get(x) : null) ?? ([...alive.values()].includes(x) ? x : null);
         if (!id) {
-          const any = this.s.db.prepare('SELECT id, archived_at FROM tags WHERE id = ? OR name = ?').get(x, x.replace(/^#/, '')) as Row | undefined;
+          const any = this.s.db.prepare('SELECT id, archived_at, deleted_at FROM tags WHERE id = ? OR name = ?').get(x, x.replace(/^#/, '')) as Row | undefined;
+          if (any?.deleted_at) throw new ApiError(400, 'tag_in_trash');
           if (any?.archived_at) throw new ApiError(400, 'tag_archived', `tag ${x} is archived`);
           throw new ApiError(400, 'unknown_tag', `tag ${x} is not registered`);
         }
@@ -218,10 +293,11 @@ export class TagStore {
 
   /**
    * 답장은 원문의 주 태그를 전부 따라간다(마스터 #1795) — 원문 순서를 앞에(메인 태그 유지) · 보기·태그 줄로 더 붙인 것은 뒤에 ·
-   * 보관된 원문 태그는 건너뛴다 · 주 태그가 된 것은 인라인에서 뺀다.
+   * 보관·휴지통·숨긴 원문 태그는 건너뛴다(숨김은 마이그레이션 21 — 답장 상속에서 빠짐) · 주 태그가 된 것은 인라인에서 뺀다.
    */
   inheritReply(t: { primary: string[]; inline: string[] }, replyTo: number): { primary: string[]; inline: string[] } {
-    const alive = new Set(this.aliveByName().values());
+    const hidden = new Set((this.s.db.prepare('SELECT id FROM tags WHERE hidden_at IS NOT NULL').all() as Row[]).map((r) => r.id as string));
+    const alive = new Set([...this.aliveByName().values()].filter((id) => !hidden.has(id)));
     const from = this.primaryOf(replyTo).filter((id) => alive.has(id));
     const primary = [...from, ...t.primary.filter((id) => !from.includes(id))];
     return { primary, inline: t.inline.filter((id) => !primary.includes(id)) };
@@ -236,7 +312,8 @@ export class TagStore {
     const map = new Map<number, MessageTags>();
     if (seqs.length === 0) return map;
     const rows = this.s.db
-      .prepare(`SELECT mt.message_seq, mt.role, t.id, t.name FROM message_tags mt JOIN tags t ON t.id = mt.tag_id WHERE mt.message_seq IN (${seqs.map(() => '?').join(',')}) ORDER BY mt.rowid`)
+      // 휴지통 태그는 글 칩에서 뺀다(연결은 지킴 · 되살리면 다시 보임)
+      .prepare(`SELECT mt.message_seq, mt.role, t.id, t.name FROM message_tags mt JOIN tags t ON t.id = mt.tag_id WHERE mt.message_seq IN (${seqs.map(() => '?').join(',')}) AND t.deleted_at IS NULL ORDER BY mt.rowid`)
       .all(...seqs) as Row[];
     for (const r of rows) {
       const cur = map.get(r.message_seq as number) ?? { primary: [], inline: [] };
@@ -253,6 +330,7 @@ export class TagStore {
   view(pr: Principal, tagId: string, after = 0, limit = 200): { tag: Tag; messages: Message[]; next_cursor: number; has_more: boolean } {
     const tag = this.get(tagId);
     if (!tag) throw new ApiError(404, 'not_found');
+    if (tag.deleted_at) throw new ApiError(404, 'tag_in_trash');
     const lim = Math.min(Math.max(1, limit), 500);
     const me = pr.participant;
     const rows = (

@@ -249,16 +249,21 @@ export async function buildApp(cfg: Config, opts: { logger?: boolean; registry?:
   fastify.put<{ Body: { lang?: unknown } }>('/api/settings/lang', { preHandler: auth }, async (req) => store.setLang(req.principal!, req.body?.lang));
   fastify.get('/api/participants', { preHandler: auth }, async () => ({ participants: store.listParticipants(true) }));
   // 태그 등록부(마이그레이션 19 · 마스터 #1475·#1481): 목록은 누구나 · 만들기·고치기(이름·담당자·보관)는 마스터만 · 대표 에이전트 설정
-  fastify.get<{ Querystring: { archived?: string } }>('/api/tags', { preHandler: auth }, async (req) => ({
-    tags: store.tags.list(req.query?.archived === '1'),
+  // 숨김·휴지통(마이그레이션 21): ?hidden=1 · ?trash=1 로 함께 받는다(기본은 살아 있는 것만)
+  fastify.get<{ Querystring: { archived?: string; hidden?: string; trash?: string } }>('/api/tags', { preHandler: auth }, async (req) => ({
+    tags: store.tags.list({ archived: req.query?.archived === '1', hidden: req.query?.hidden === '1', trash: req.query?.trash === '1' }),
     default_agent: store.tags.defaultAgent(),
   }));
   fastify.post<{ Body: { name?: unknown; owner_id?: unknown } }>('/api/tags', { preHandler: auth }, async (req, reply) =>
     reply.code(201).send({ tag: store.tags.create(req.principal!, req.body ?? {}) }),
   );
-  fastify.patch<{ Params: { id: string }; Body: { name?: unknown; owner_id?: unknown; archived?: unknown } }>('/api/tags/:id', { preHandler: auth }, async (req) => ({
+  fastify.patch<{ Params: { id: string }; Body: { name?: unknown; owner_id?: unknown; archived?: unknown; hidden?: unknown } }>('/api/tags/:id', { preHandler: auth }, async (req) => ({
     tag: store.tags.update(req.principal!, req.params.id, req.body ?? {}),
   }));
+  // 태그 휴지통(마스터만 · 마이그레이션 21): 버리기 · 되살리기 · 영구 삭제(휴지통 것만 — 아니면 409 not_in_trash)
+  fastify.post<{ Params: { id: string } }>('/api/tags/:id/trash', { preHandler: auth }, async (req) => ({ tag: store.tags.trash(req.principal!, req.params.id) }));
+  fastify.post<{ Params: { id: string } }>('/api/tags/:id/restore', { preHandler: auth }, async (req) => ({ tag: store.tags.restore(req.principal!, req.params.id) }));
+  fastify.delete<{ Params: { id: string } }>('/api/tags/:id', { preHandler: auth }, async (req) => store.tags.purge(req.principal!, req.params.id));
   // 태그 보기(사양 2.2): 이 태그가 든 글만 — 읽을 수 있는 스레드의 것 · 커서는 메시지 목록과 같은 꼴
   fastify.get<{ Params: { id: string }; Querystring: { after?: string; limit?: string } }>('/api/tags/:id/messages', { preHandler: auth }, async (req) =>
     store.tags.view(req.principal!, req.params.id, Number(req.query?.after ?? 0) || 0, Number(req.query?.limit ?? 200) || 200),

@@ -522,6 +522,13 @@ const MIGRATIONS: Migration[] = [
   CREATE UNIQUE INDEX agent_sessions_one_active ON agent_sessions(thread_id, agent_id, lane) WHERE status = 'active';
   ALTER TABLE runs ADD COLUMN lane TEXT NOT NULL DEFAULT '';
   `,
+  // 21 — 태그 관리(2026-11-19 마스터 «기존 태그를 삭제하거나 숨기는 기능»): 스레드 정리(숨김·휴지통·영구 삭제)와 같은 꼴.
+  //     hidden_at = 숨김(목록·고르개·자동완성·답장 상속에서 빠짐 · 인식·태그 방·글쓰기는 그대로) ·
+  //     deleted_at = 휴지통(인식 멈춤 · 글 연결 message_tags 는 지킴 · 되살리기 가능). 영구 삭제는 행을 지운다(휴지통 것만).
+  `
+  ALTER TABLE tags ADD COLUMN hidden_at INTEGER;
+  ALTER TABLE tags ADD COLUMN deleted_at INTEGER;
+  `,
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.length;

@@ -81,6 +81,7 @@
           <span class="sec-tools">
             <button type="button" id="tag-new" class="link small" hidden data-i18n="html.side.tagNew">+ 새 태그</button>
             <label class="small"><input type="checkbox" id="tag-show-archived"> <span data-i18n="html.side.tagsArchived">보관 포함</span></label>
+            <label class="small"><input type="checkbox" id="tag-show-hidden"> <span data-i18n="html.side.tagsHidden">숨김 포함</span></label>
           </span>
         </div>
         <nav id="tag-list" aria-label="태그" data-i18n-attr="aria-label:html.side.tags"></nav>
@@ -319,10 +320,16 @@
         <button type="button" id="tg-reload" data-i18n="html.common.reload">새로 고침</button>
       </div>
       <p id="tg-readonly" class="note-box small" hidden data-i18n="html.tag.readonly">보관한 태그입니다 — 읽기만 됩니다. 새 글에 주 태그로 붙일 수 없고 노트 최신화도 돌지 않습니다.</p>
+      <div id="tg-trashed" class="note-box small" hidden>
+        <p data-i18n="html.tag.trashed">휴지통에 있는 태그입니다 — 태그로 인식되지 않고 글 칩에서도 빠집니다. 지난 글과의 연결은 남아 있어 되살릴 수 있습니다.</p>
+        <span id="tg-trash-actions" hidden><button type="button" id="tg-untrash" class="small" data-i18n="html.tag.untrash">되살리기</button> <button type="button" id="tg-purge" class="small danger" data-i18n="html.tag.purge">영구 삭제</button></span>
+      </div>
       <p id="tg-empty" class="muted small" hidden data-i18n="html.tag.empty">이 태그가 붙은 글이 아직 없습니다.</p>
       <div id="tg-admin" class="tg-admin small" hidden>
         <label><span data-i18n="html.tag.owner">담당자</span> <select id="tg-owner" aria-label="담당자" data-i18n-attr="aria-label:html.tag.owner"></select></label>
         <button type="button" id="tg-archive" class="small"></button>
+        <button type="button" id="tg-hide" class="small"></button>
+        <button type="button" id="tg-trash" class="small danger" data-i18n="html.tag.trash">삭제</button>
       </div>
       <div id="tg-msgs" class="tg-msgs" role="log" aria-label="태그가 붙은 글"></div>
       <form id="tg-compose" class="tg-compose" hidden>

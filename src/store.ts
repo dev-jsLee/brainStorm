@@ -454,7 +454,9 @@ function inertForwardHeads(body: string): string {
 }
 
 /** 차선(마스터 #1563) — 글(seq = ?)의 첫 주 태그 id, 없으면 ''. 파서가 머리 순서대로 넣으므로 rowid 가 곧 순서 */
-const LANE_SQL = "SELECT COALESCE((SELECT tag_id FROM message_tags WHERE message_seq = ? AND role = 'primary' ORDER BY rowid LIMIT 1), '') AS lane";
+// 휴지통에 든 태그는 차선이 되지 않는다(마이그레이션 21) — 그 태그가 붙은 옛 글의 새 전달은 다음 주 태그 또는 기본 차선으로. 이미 도는 실행은 제 lane 을 그대로 쥔다
+const LANE_SQL =
+  "SELECT COALESCE((SELECT lmt.tag_id FROM message_tags lmt JOIN tags ltg ON ltg.id = lmt.tag_id WHERE lmt.message_seq = ? AND lmt.role = 'primary' AND ltg.deleted_at IS NULL ORDER BY lmt.rowid LIMIT 1), '') AS lane";
 
 export class Store {
   readonly events = new EventEmitter();

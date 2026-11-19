@@ -11,7 +11,7 @@ const S = {
   participants: new Map(),
   agents: new Map(), // id → 연결 상태(/api/agents)
   threads: [],
-  tags: [], // 태그 등록부(보관 포함 · /api/tags?archived=1 · 마이그레이션 19)
+  tags: [], // 태그 등록부(보관·숨김 포함 · 마스터는 휴지통도 · /api/tags?archived=1&hidden=1[&trash=1] · 마이그레이션 19·21)
   defaultAgent: null, // 대표 에이전트(meta default_agent)
   tagCur: null, // 태그 보기 페이지의 태그 id
   roomDetail: null,
@@ -1455,7 +1455,7 @@ function tagsSoon() {
   tagReloadTimer = setTimeout(() => loadTags().catch(() => {}), 1500);
 }
 async function loadTags() {
-  const r = await api('GET', '/api/tags?archived=1');
+  const r = await api('GET', `/api/tags?archived=1&hidden=1${S.me?.is_master ? '&trash=1' : ''}`);
   S.tags = r.tags ?? [];
   S.defaultAgent = r.default_agent ?? null;
   renderTagList();
@@ -1485,6 +1485,8 @@ function tagItem(tg) {
       el('span', { class: 'orbit-dot', 'aria-hidden': 'true' }),
       el('span', { class: 'ttl' }, `#${tg.name}`),
       tg.archived_at ? el('span', { class: 'badge' }, t('app.tag_archived')) : null,
+      tg.hidden_at ? el('span', { class: 'badge' }, t('app.tag_hidden')) : null,
+      tg.deleted_at ? el('span', { class: 'badge' }, t('app.tag_trashed')) : null,
     ),
     el('div', { class: 'l2' }, `${tagRecipientLine(tg)} · ${t(`app.tag_band_${band}`)}`),
   );
@@ -1493,16 +1495,28 @@ function renderTagList() {
   const nav = $('tag-list');
   if (!nav) return;
   const showArchived = $('tag-show-archived').checked;
-  const live = S.tags.filter((x) => !x.archived_at);
-  const archived = S.tags.filter((x) => !!x.archived_at);
+  const showHidden = $('tag-show-hidden').checked;
+  // 기본 목록 = 살아 있고 안 숨긴 것 · 보관(체크) · 숨김(체크) · 휴지통(마스터만 · 마이그레이션 21) — 묶음은 접힘 상태를 기억한다
+  const live = S.tags.filter((x) => !x.archived_at && !x.hidden_at && !x.deleted_at);
+  const archived = S.tags.filter((x) => !!x.archived_at && !x.deleted_at);
+  const hidden = S.tags.filter((x) => !!x.hidden_at && !x.archived_at && !x.deleted_at);
+  const trash = S.me?.is_master ? S.tags.filter((x) => !!x.deleted_at) : [];
   const items = live.map(tagItem);
-  if (showArchived && archived.length) {
-    const d = el('details', { open: store('bs.tags-archived-open') === '1' ? '' : null }, el('summary', {}, t('app.tag_archived_n', { n: archived.length })), ...archived.map(tagItem));
-    d.addEventListener('toggle', () => store('bs.tags-archived-open', d.open ? '1' : '0'));
+  const group = (key, label, list) => {
+    const d = el('details', { class: `tag-group tag-group-${key}`, open: store(`bs.tags-${key}-open`) === '1' ? '' : null }, el('summary', {}, label), ...list.map(tagItem));
+    d.addEventListener('toggle', () => store(`bs.tags-${key}-open`, d.open ? '1' : '0'));
     items.push(d);
-  }
+  };
+  if (showHidden && hidden.length) group('hidden', t('app.tag_hidden_n', { n: hidden.length }), hidden);
+  if (showArchived && archived.length) group('archived', t('app.tag_archived_n', { n: archived.length }), archived);
+  if (trash.length) group('trash', t('app.tag_trash_n', { n: trash.length }), trash);
   nav.replaceChildren(...(items.length ? items : [el('div', { class: 'empty-list' }, t('app.no_tags'))]));
 }
+$('tag-show-hidden').addEventListener('change', () => {
+  store('bs.tags-hidden', $('tag-show-hidden').checked ? '1' : '0');
+  renderTagList();
+});
+$('tag-show-hidden').checked = store('bs.tags-hidden') === '1';
 $('tag-show-archived').addEventListener('change', () => {
   store('bs.tags-archived', $('tag-show-archived').checked ? '1' : '0');
   renderTagList();
@@ -1526,16 +1540,22 @@ async function showTag(id, opts = {}) {
   const tg = tagById(id);
   renderTagList();
   $('tg-h').textContent = tg ? `#${tg.name}` : t('app.tag_not_found');
-  $('tg-readonly').hidden = !tg?.archived_at;
+  $('tg-readonly').hidden = !tg?.archived_at || !!tg?.deleted_at;
+  // 휴지통 태그(마이그레이션 21): 글은 안 읽고 안내 + 마스터에게 되살리기·영구 삭제
+  $('tg-trashed').hidden = !tg?.deleted_at;
+  $('tg-trash-actions').hidden = !tg?.deleted_at || !S.me?.is_master;
   $('tg-meta').textContent = tg ? tagRecipientLine(tg) : '';
   $('tg-empty').hidden = true;
   renderTagPageAdmin(tg);
   renderTagCompose(tg);
   const box = $('tg-msgs');
   // 같은 태그를 다시 읽을 때는 비우지 않는다 — 비우면 높이가 줄어 스크롤이 맨 위로 튄다
-  if (!same || !tg) box.replaceChildren();
-  S.tagShown = tg ? id : null;
-  if (!tg) return;
+  if (!same || !tg || tg.deleted_at) box.replaceChildren();
+  S.tagShown = tg && !tg.deleted_at ? id : null;
+  if (!tg || tg.deleted_at) {
+    $('tg-reply').hidden = true;
+    return;
+  }
   const key = {};
   tagLoading = key;
   const all = [];
@@ -1610,12 +1630,13 @@ $('tag-new').addEventListener('click', async () => {
 });
 function renderTagPageAdmin(tg) {
   const master = !!S.me?.is_master;
-  $('tg-admin').hidden = !master || !tg;
-  if (!master || !tg) return;
+  $('tg-admin').hidden = !master || !tg || !!tg.deleted_at;
+  if (!master || !tg || tg.deleted_at) return;
   const def = S.defaultAgent ? t('app.tag_owner_default', { name: pname(S.defaultAgent) }) : t('app.tag_owner_default_none');
   $('tg-owner').replaceChildren(el('option', { value: '' }, def), ...agentList().map((a) => el('option', { value: a.id, selected: tg.owner_id === a.id }, a.name)));
   $('tg-owner').disabled = !!tg.archived_at;
   $('tg-archive').textContent = tg.archived_at ? t('app.tag_restore') : t('app.tag_archive');
+  $('tg-hide').textContent = tg.hidden_at ? t('app.tag_unhide') : t('app.tag_hide');
 }
 async function patchTag(id, body) {
   try {
@@ -1636,11 +1657,52 @@ $('tg-archive').addEventListener('click', async () => {
   }
   patchTag(tg.id, { archived: !tg.archived_at });
 });
+// 숨김(마이그레이션 21): 목록·고르개·자동완성·답장 상속에서만 빠진다 — 묻지 않고 바로(되돌리기 쉬움)
+$('tg-hide').addEventListener('click', () => {
+  const tg = tagById(S.tagCur);
+  if (tg) patchTag(tg.id, { hidden: !tg.hidden_at });
+});
+async function tagAction(id, method, path, body) {
+  try {
+    const r = await api(method, path, body);
+    await loadTags();
+    if (S.tagCur === id) await showTag(id);
+    return r;
+  } catch (e) {
+    notify(t('app.failed_title'), e.message);
+    return null;
+  }
+}
+// 삭제 = 휴지통: 인식이 멈추고 글 칩에서 빠진다 · 연결은 남아 되살릴 수 있다
+$('tg-trash').addEventListener('click', async () => {
+  const tg = tagById(S.tagCur);
+  if (!tg) return;
+  const ok = await ask({ title: t('app.tag_trash_title'), text: t('app.tag_trash_text', { name: tg.name }), ok: t('app.tag_trash'), danger: true });
+  if (ok) tagAction(tg.id, 'POST', `/api/tags/${encodeURIComponent(tg.id)}/trash`);
+});
+$('tg-untrash').addEventListener('click', () => {
+  const tg = tagById(S.tagCur);
+  if (tg) tagAction(tg.id, 'POST', `/api/tags/${encodeURIComponent(tg.id)}/restore`);
+});
+// 영구 삭제: 되돌릴 수 없다 — 태그 이름을 그대로 다시 쳐야 지운다
+$('tg-purge').addEventListener('click', async () => {
+  const tg = tagById(S.tagCur);
+  if (!tg) return;
+  const input = el('input', { type: 'text', maxlength: '41', placeholder: t('app.tag_name_ph'), 'aria-label': t('app.tag_name_ph'), autocomplete: 'off' });
+  const ok = await ask({ title: t('app.tag_purge_title'), text: t('app.tag_purge_text', { name: tg.name }), ok: t('app.tag_purge'), danger: true, extra: input });
+  if (!ok) return;
+  if (input.value.trim().replace(/^#/, '') !== tg.name) return notify(t('app.failed_title'), t('app.tag_purge_mismatch'));
+  const r = await tagAction(tg.id, 'DELETE', `/api/tags/${encodeURIComponent(tg.id)}`);
+  if (r) {
+    notify(t('app.tag_purged', { name: r.name, n: r.links }), '');
+    if (S.tagCur === tg.id) location.hash = '';
+  }
+});
 // ── 태그 보기 글쓰기(D1): 루트 채팅방에 들어가고 보기의 태그가 주 태그로 붙는다 · 기본 수신 = 담당자(없으면 대표) · 보관 태그면 칸 없음
 function renderTagCompose(tg) {
   const form = $('tg-compose');
   const r = room();
-  form.hidden = !tg || !!tg.archived_at || !r;
+  form.hidden = !tg || !!tg.archived_at || !!tg.deleted_at || !r;
   if (form.hidden) return;
   const to = $('tg-to');
   // 사용자가 손댄 값만 지킨다 — 담당자·대표가 바뀌면 기본값이 따라간다
@@ -1959,7 +2021,7 @@ function inheritReplyTags(m) {
   const ta = $('body');
   if (S.replyTagLine != null && ta.value === S.replyTagLine) ta.value = S.replyTagPrev ?? ''; // 손대지 않은 채 다른 글에 답장하면 그 글의 태그로 갈아 낀다
   S.replyTagLine = null;
-  const live = new Set((S.tags ?? []).filter((x) => !x.archived_at).map((x) => x.id));
+  const live = new Set((S.tags ?? []).filter((x) => !x.archived_at && !x.hidden_at && !x.deleted_at).map((x) => x.id));
   const names = (m.tags?.primary ?? []).filter((x) => live.has(x.id)).map((x) => x.name);
   if (!names.length || headTagLine(ta.value).idx >= 0) return;
   const line = names.map((n) => `#${n}`).join(' ');
@@ -3627,7 +3689,7 @@ function tagSuggest(ta) {
     const q = query();
     if (!q) return close();
     const ql = q.q.toLowerCase();
-    const live = (S.tags ?? []).filter((x) => !x.archived_at);
+    const live = (S.tags ?? []).filter((x) => !x.archived_at && !x.hidden_at && !x.deleted_at);
     const pref = live.filter((x) => x.name.toLowerCase().startsWith(ql)).sort(recent);
     const sub = live.filter((x) => !pref.includes(x) && x.name.toLowerCase().includes(ql)).sort(recent);
     const opts = [...pref, ...sub].slice(0, 8).map((tag) => ({ tag }));
@@ -3726,7 +3788,7 @@ function toggleHeadTag(v, name) {
 function renderTagPick() {
   const box = $('tag-pick');
   if (!box) return;
-  const live = (S.tags ?? []).filter((x) => !x.archived_at).sort((a, b) => (b.last_called_at ?? 0) - (a.last_called_at ?? 0) || a.name.localeCompare(b.name));
+  const live = (S.tags ?? []).filter((x) => !x.archived_at && !x.hidden_at && !x.deleted_at).sort((a, b) => (b.last_called_at ?? 0) - (a.last_called_at ?? 0) || a.name.localeCompare(b.name));
   box.hidden = !live.length;
   if (!live.length) return box.replaceChildren();
   const on = new Set(headTagLine($('body').value).names);
@@ -3757,7 +3819,8 @@ function headTagLead(v, pos) {
   if (pos > end || v.slice(pos, end).trim() !== '') return false;
   const m = v.slice(0, pos).match(/^\s*((?:#[\p{L}\p{N}_-]{1,40}\s+)+)$/u);
   if (!m) return false;
-  const known = new Set((S.tags ?? []).filter((x) => !x.archived_at).map((x) => x.name));
+  // 숨긴 태그도 인식된다(마이그레이션 21) — 휴지통 태그만 뺀다
+  const known = new Set((S.tags ?? []).filter((x) => !x.archived_at && !x.deleted_at).map((x) => x.name));
   // «#1537 #A ␣»처럼 글 번호를 같이 적은 줄도 태그 줄이다(마스터 #1539 · 서버도 #숫자는 건너뛰고 줄은 태그 줄로 본다) — 글 번호는 빼고 나머지가 모두 등록 태그이고 하나 이상일 때만
   const names = [...m[1].matchAll(/#([\p{L}\p{N}_-]{1,40})/gu)].map((x) => x[1]).filter((n) => !/^\p{N}+$/u.test(n));
   return names.length > 0 && names.every((n) => known.has(n));

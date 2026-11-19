@@ -92,5 +92,30 @@ describe('README 어댑터 절', () => {
         }
       });
     }
+    test(`${f} herdr: 폴더 → 토큰 → env → 유닛 템플릿 → env 읽기 → check → 인스턴스 켜기 순서 · 서버 외부 공개 세 값`, () => {
+      const s = read(f);
+      const start = s.indexOf('### herdr');
+      assert.ok(start > 0);
+      const body = s.slice(start, s.indexOf('\n### ', start + 5));
+      for (const k of ['BRAINSTORM_ALLOW_EXTERNAL=1', 'BRAINSTORM_LISTEN=127.0.0.1:8080,', 'BRAINSTORM_ORIGINS=https://']) assert.ok(body.includes(k), k);
+      const steps = ['token create', 'mkdir -p ~/.config/brainstorm ~/.config/systemd/user', 'install -m 600 ~/herdr-track-a.token', 'deploy/herdr/herdr.env.example > ~/.config/brainstorm/herdr-track-a.env', '> ~/.config/systemd/user/brainstorm-agent-herdr@.service', '. ~/.config/brainstorm/herdr-track-a.env', 'herdr-adapter.js check', 'enable --now brainstorm-agent-herdr@track-a'];
+      let at = -1;
+      for (const step of steps) {
+        const i = body.indexOf(step, at + 1);
+        assert.ok(i > at, step);
+        at = i;
+      }
+    });
   }
+});
+
+describe('herdr 유닛 템플릿', () => {
+  test('인스턴스 이름으로 env 를 고르고 · env 본보기의 이름 자리가 sed 로 바뀐다', () => {
+    const u = read('deploy/herdr/brainstorm-agent-herdr@.service');
+    assert.match(u, /^EnvironmentFile=%h\/\.config\/brainstorm\/herdr-%i\.env$/m);
+    assert.match(u, /herdr-adapter\.js run$/m);
+    const e = read('deploy/herdr/herdr.env.example');
+    assert.match(e.replaceAll('NAME', 'track-a'), /^BRAINSTORM_TOKEN_FILE=\/home\/you\/\.config\/brainstorm\/herdr-track-a\.token$/m);
+    for (const k of ['HERDR_SESSION=', 'HERDR_PANE=']) assert.match(e, new RegExp(`^${k}`, 'm'));
+  });
 });

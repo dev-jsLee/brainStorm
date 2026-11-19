@@ -272,6 +272,63 @@ ok($('tag-list').querySelector('details summary')?.textContent === '보관 1', '
   ta.value = '';
   ta.dispatchEvent(new w.Event('input', { bubbles: true }));
 }
+// 태그 관리(2026-11-19 · 마이그레이션 21): 숨김 → 목록·고르개에서 빠지고 «숨김 포함»으로만 · 삭제(휴지통) → 안내·되살리기 · 영구 삭제는 이름 확인
+{
+  const mk = await ctx.master('POST', '/api/tags', { name: '관리시험' });
+  const id = mk.json.tag.id;
+  await w.__loadTags();
+  const cur = () => w.__S.tags.find((x) => x.id === id);
+  await go(`#tag/${id}`);
+  await until(() => !$('tg-admin').hidden && $('tg-hide').textContent === '숨기기', '태그 관리 칸 · 숨기기 단추');
+  ok($('tag-list').textContent.includes('#관리시험') && $('tag-pick').textContent.includes('관리시험'), '숨기기 전: 목록·고르개에 있음');
+  $('tg-hide').click();
+  await until(() => cur()?.hidden_at && $('tg-hide').textContent === '숨김 해제', '숨김 반영');
+  $('tag-show-hidden').checked = false;
+  $('tag-show-hidden').dispatchEvent(new w.Event('change'));
+  ok(!$('tag-list').textContent.includes('#관리시험') && !$('tag-pick').textContent.includes('관리시험'), '숨기면 목록·고르개에서 빠짐');
+  ok(!$('tg-compose').hidden, '숨긴 태그 방에서도 글쓰기 칸은 그대로');
+  $('tag-show-hidden').checked = true;
+  $('tag-show-hidden').dispatchEvent(new w.Event('change'));
+  ok($('tag-list').textContent.includes('숨긴 태그 1') && $('tag-list').querySelector('.tag-group-hidden'), '«숨김 포함» → «숨긴 태그 1» 묶음');
+  $('tag-show-hidden').checked = false;
+  $('tag-show-hidden').dispatchEvent(new w.Event('change'));
+  $('tg-hide').click();
+  await until(() => cur() && !cur().hidden_at, '숨김 해제');
+  ok($('tag-list').textContent.includes('#관리시험'), '숨김 해제 → 목록에 돌아옴');
+  // 삭제 = 휴지통
+  $('tg-trash').click();
+  await until(() => !$('confirm').hidden, '삭제 확인 창');
+  ok($('confirm').textContent.includes('휴지통'), '확인 창이 휴지통이라고 알림');
+  $('confirm-ok').click();
+  await until(() => cur()?.deleted_at && !$('tg-trashed').hidden, '휴지통 반영 · 안내');
+  ok(!$('tg-trash-actions').hidden && $('tg-admin').hidden && $('tg-compose').hidden, '휴지통 태그: 되살리기·영구 삭제만 · 관리·글쓰기 칸 없음');
+  ok($('tag-list').querySelector('.tag-group-trash')?.textContent.includes('휴지통 1') && !$('tag-pick').textContent.includes('관리시험'), '사이드바 «휴지통 1» · 고르개에서 빠짐');
+  $('tg-untrash').click();
+  await until(() => cur() && !cur().deleted_at && $('tg-trashed').hidden, '되살리기');
+  ok(!$('tg-compose').hidden && !$('tg-admin').hidden, '되살리면 관리·글쓰기 칸이 돌아옴');
+  // 영구 삭제: 휴지통에 넣고 → 틀린 이름이면 안 지움 → 맞는 이름이면 지움
+  $('tg-trash').click();
+  await until(() => !$('confirm').hidden, '삭제 확인 창 2');
+  $('confirm-ok').click();
+  await until(() => cur()?.deleted_at && !$('tg-trash-actions').hidden, '다시 휴지통');
+  $('tg-purge').click();
+  await until(() => !$('confirm').hidden && $('confirm-extra').querySelector('input'), '영구 삭제 확인 창(이름 칸)');
+  $('confirm-extra').querySelector('input').value = '틀린이름';
+  $('confirm-ok').click();
+  await until(() => !$('confirm').hidden && $('confirm').textContent.includes('이름이 맞지 않아'), '틀린 이름 → 안 지움 안내');
+  $('confirm-ok').click();
+  await sleep(80);
+  ok(!!cur(), '틀린 이름이면 태그가 남음');
+  $('tg-purge').click();
+  await until(() => !$('confirm').hidden && $('confirm-extra').querySelector('input'), '영구 삭제 확인 창 2');
+  $('confirm-extra').querySelector('input').value = '#관리시험';
+  $('confirm-ok').click();
+  await until(() => !$('confirm').hidden && $('confirm').textContent.includes('영구 삭제'), '영구 삭제 알림');
+  $('confirm-ok').click();
+  await until(() => !cur(), '목록에서 사라짐');
+  ok(!$('tag-list').textContent.includes('관리시험'), '영구 삭제 → 휴지통 묶음에서도 사라짐');
+  ok((await ctx.master('POST', '/api/tags', { name: '관리시험' })).status === 201, '같은 이름을 다시 만들 수 있음');
+}
 console.log('errors:', errors);
 if (errors.length) throw new Error('화면 오류');
 console.log('태그 화면 스모크 통과');

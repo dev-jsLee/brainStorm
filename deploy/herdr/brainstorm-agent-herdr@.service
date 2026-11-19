@@ -1,0 +1,20 @@
+# 사용자 유닛 템플릿: ~/.config/systemd/user/ 에 두고 창 하나당 인스턴스 하나 — systemctl --user enable --now brainstorm-agent-herdr@<이름>
+# 설정 ~/.config/brainstorm/herdr-<이름>.env · 토큰 ~/.config/brainstorm/herdr-<이름>.token(600)
+[Unit]
+Description=brainStorm herdr 어댑터 %i — 수신 대상으로 불리면 이미 도는 herdr 창에 글을 넣고 답을 올린다 (brainStorm 서버로 나가는 연결만)
+After=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=%h/.config/brainstorm/herdr-%i.env
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+Environment=BRAINSTORM_WORKER=%H-herdr-%i
+ExecStart=/usr/bin/env node %h/.local/lib/brainstorm-adapter/dist/adapter/herdr-adapter.js run
+Restart=on-failure
+RestartSec=30
+RestartPreventExitStatus=2 4
+KillMode=mixed
+TimeoutStopSec=20
+
+[Install]
+WantedBy=default.target
