@@ -98,6 +98,7 @@ npm run test:ui   # UI 스모크: jsdom 으로 public/*.js 를 실제 서버에 
 | `BRAINSTORM_ALLOW_EXTERNAL` | `1` 이어야 루프백 밖 주소를 듣는다(기본 꺼짐) |
 | `BRAINSTORM_ORIGINS` | 쿠키 인증 상태 변경 요청·WebSocket 이 받는 Origin. **브라우저로 여는 주소(LAN IP·도메인)를 반드시 더한다** |
 | `BRAINSTORM_SECURE_COOKIE` | `auto` = HTTPS 요청일 때만 Secure |
+| `BRAINSTORM_TRUSTED_PROXIES` | `X-Forwarded-For` · `X-Forwarded-Proto` 를 믿을 프록시 주소(IP · CIDR, 쉼표). **이 주소에서 온 요청만** 믿는다 — 로그인 실패 잠금 · 감사 IP · Secure 쿠키(`auto`)가 실제 접속자를 따른다. 비면 아무것도 안 믿는다(직접 접속 주소) |
 | `BRAINSTORM_MODULES` | 켤 선택 모듈(쉼표 · `all` · 비면 core 만) — 대면 `face` · 위임 대장 `delegations` · 요청 `requests` · 상위로 합치기 `merge`(`docs/MODULES.md`) |
 | `BRAINSTORM_FACE_DRAFTER` · `BRAINSTORM_FACE_REVIEWER` | 대면 모드의 초안·검토 에이전트 id. 비우면 대면 모드를 못 켠다 |
 | 그 밖 | 크기 제한·lease·취소 확인 대기·호출 예산 — `deploy/brainstorm.env` 주석 |

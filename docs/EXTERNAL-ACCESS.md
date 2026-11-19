@@ -46,12 +46,14 @@ oauth2-proxy · Authelia · Caddy/nginx + 기본 인증. brainStorm 은 루프�
 
 ```ini
 BRAINSTORM_ORIGINS=https://<도메인>,http://127.0.0.1:8080
+BRAINSTORM_TRUSTED_PROXIES=127.0.0.1
 BRAINSTORM_SECURE_COOKIE=auto
 ```
 
 - WebSocket(`/ws`)을 넘겨야 한다(nginx 면 `Upgrade`/`Connection` 헤더).
 - 앞단이 걸러도 brainStorm 의 패스프레이즈 로그인은 그대로다 — 두 겹이다. 앞단의 신원을 brainStorm 이 믿는 기능은 이 판에 없다.
 - 업로드 크기: 앞단 본문 한도를 `BRAINSTORM_ATTACHMENT_MAX_BYTES`(기본 20MB)보다 크게.
+- `BRAINSTORM_TRUSTED_PROXIES` 에는 앞단의 주소(같은 기계면 `127.0.0.1`)를 둔다. 안 두면 모든 요청이 앞단 IP 로 보여 로그인 실패 잠금이 모두에게 함께 걸리고 감사 IP 가 앞단 것이 된다. TLS 를 앞단이 끝내면 `auto` 는 `X-Forwarded-Proto` 를 믿어야 `Secure` 를 붙인다 — 앞단이 그 머리를 넘기는지 확인한다. 앞단이 **다른 기계**면 brainStorm 이 루프백만 들어서는 닿지 않는다 — `BRAINSTORM_ALLOW_EXTERNAL=1` · `BRAINSTORM_LISTEN=127.0.0.1:8080,<서버 IP>:8080` 을 두고, 서버 방화벽으로 8080 을 앞단 기계에만 연다.
 
 ### D. 내부망에서 직접 (앞단 없이)
 

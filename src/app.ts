@@ -67,7 +67,8 @@ export async function buildApp(cfg: Config, opts: { logger?: boolean; registry?:
   const fastify = Fastify({
     logger: opts.logger === false ? false : { level: cfg.logLevel },
     bodyLimit: cfg.httpBodyLimit,
-    trustProxy: false,
+    // 지정한 프록시에서 온 요청만 X-Forwarded-* 를 믿는다(proxy-addr — 오른쪽부터 믿는 주소를 걷어 낸 첫 주소가 req.ip). 비면 안 믿음
+    trustProxy: cfg.trustedProxies.length ? cfg.trustedProxies : false,
     serverFactory: (h) => {
       handler = h;
       return http.createServer(h);
