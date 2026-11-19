@@ -158,6 +158,7 @@ install -m 600 ~/claude.token ~/.config/brainstorm/claude.token && rm ~/claude.t
 cp -r dist package.json ~/.local/lib/brainstorm-adapter/
 sed "s#/home/you#$HOME#" deploy/claude-cli/claude.env.example > ~/.config/brainstorm/claude.env   # 서버가 다른 기계면 BRAINSTORM_URL 을 고친다
 sed "s#/usr/bin/env node#$(command -v node)#" deploy/claude-cli/brainstorm-agent-claude.service > ~/.config/systemd/user/brainstorm-agent-claude.service
+mkdir -p ~/.local/bin && sed "1s#/usr/bin/env node#$(command -v node)#" deploy/claude-cli/bs-ask.mjs > ~/.local/bin/bs-ask && chmod 755 ~/.local/bin/bs-ask   # 질문함 명령 — 에이전트가 턴 안에서 부른다(서버에 questions 모듈이 꺼져 있으면 답에 선택지를 적는다)
 set -a; . ~/.config/brainstorm/claude.env; set +a
 node ~/.local/lib/brainstorm-adapter/dist/adapter/claude-cli-adapter.js check
 systemctl --user daemon-reload

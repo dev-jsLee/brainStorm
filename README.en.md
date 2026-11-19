@@ -162,6 +162,7 @@ install -m 600 ~/claude.token ~/.config/brainstorm/claude.token && rm ~/claude.t
 cp -r dist package.json ~/.local/lib/brainstorm-adapter/
 sed "s#/home/you#$HOME#" deploy/claude-cli/claude.env.example > ~/.config/brainstorm/claude.env   # edit BRAINSTORM_URL if the server is on another machine
 sed "s#/usr/bin/env node#$(command -v node)#" deploy/claude-cli/brainstorm-agent-claude.service > ~/.config/systemd/user/brainstorm-agent-claude.service
+mkdir -p ~/.local/bin && sed "1s#/usr/bin/env node#$(command -v node)#" deploy/claude-cli/bs-ask.mjs > ~/.local/bin/bs-ask && chmod 755 ~/.local/bin/bs-ask   # question-inbox command the agent calls inside a turn (if the server's questions module is off, it asks in the answer instead)
 set -a; . ~/.config/brainstorm/claude.env; set +a
 node ~/.local/lib/brainstorm-adapter/dist/adapter/claude-cli-adapter.js check
 systemctl --user daemon-reload
