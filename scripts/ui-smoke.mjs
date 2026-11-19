@@ -78,6 +78,8 @@ w.eval(
     '\n' +
     fs.readFileSync(new URL('../public/face.js', import.meta.url), 'utf8') +
     '\n' +
+    fs.readFileSync(new URL('../public/questions.js', import.meta.url), 'utf8') +
+    '\n' +
     fs.readFileSync(new URL('../public/app.js', import.meta.url), 'utf8') +
     '\nwindow.__S = S; window.__cancelRunAsk = cancelRunAsk; window.__openThread = openThread; window.__applyPrefill = applyPrefill; window.__renderRecipients = renderRecipients; window.__claimColor = claimColor; window.__claimScene = claimScene; window.__renderBody = renderBody;',
 );

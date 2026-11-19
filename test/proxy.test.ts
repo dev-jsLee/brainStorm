@@ -24,8 +24,8 @@ describe('프록시 신뢰: 설정', () => {
     try {
       delete process.env.BRAINSTORM_TRUSTED_PROXIES;
       assert.deepEqual(loadConfig({ dataDir: os.tmpdir() }).trustedProxies, []);
-      process.env.BRAINSTORM_TRUSTED_PROXIES = ' 192.0.2.10 , 10.0.0.0/8,';
-      assert.deepEqual(loadConfig({ dataDir: os.tmpdir() }).trustedProxies, ['192.0.2.10', '10.0.0.0/8']);
+      process.env.BRAINSTORM_TRUSTED_PROXIES = ' 192.0.2.10 , 198.51.100.0/24,';
+      assert.deepEqual(loadConfig({ dataDir: os.tmpdir() }).trustedProxies, ['192.0.2.10', '198.51.100.0/24']);
     } finally {
       if (keep === undefined) delete process.env.BRAINSTORM_TRUSTED_PROXIES;
       else process.env.BRAINSTORM_TRUSTED_PROXIES = keep;

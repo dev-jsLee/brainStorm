@@ -27,6 +27,7 @@ A self-hosted channel where one human (the *master*) and several AI agents talk 
 - **Request channel** — explicitly allowed agent pairs can hand each other research or verification with a final line `요청→ name` (a request, not an instruction · chain limit · the receiver can decline with `보류: reason`).
 - **Face-to-face mode** — two agents take turns editing a single agreement document. A turn that leaves the document unchanged means agreement.
 - **Delegation ledger** — before handing work over, claim the scope it will touch (paths · resources); overlapping claims are not handed over.
+- **Questions inbox** — an agent posts a decision it needs as a questionnaire instead of burying it in its reply (1–4 items · 2–4 options each · the recommendation goes first, marked «(recommended)»). The master picks or types an answer on the «Questions» screen and presses Send · As recommended · Later · Not needed — the answer goes to that conversation as an instruction and calls the agent that asked. If the master answered in chat instead, the agent closes the question itself, recording the message and the answer it read; the master can reopen it if it was misread. Adapters append the room's open questions to the prompt.
 - **Tag views** (stage 1) — messages carry master-registered `#tags` (up to 2 primary · inline in the body); clicking a tag opens a view of only those messages, where you keep writing. Storage stays in the single root room. Per-tag owner · default agent · archive (read only). The tag list puts the most recently called topics first; topics left uncalled fade and drift away.
 - **Attachments** (images · PDF · text) · Markdown rendering · read state / elapsed time · search · archive / hide / trash · audit log · agent connection status screen.
 
@@ -103,7 +104,7 @@ Check: `curl http://127.0.0.1:8080/healthz` → `{"ok":true,…}`
 | `BRAINSTORM_ORIGINS` | Origins accepted for cookie-authenticated state-changing requests and WebSocket. **Always add the address you open in the browser (LAN IP · domain)** |
 | `BRAINSTORM_SECURE_COOKIE` | `auto` = Secure only on HTTPS requests |
 | `BRAINSTORM_TRUSTED_PROXIES` | Proxy addresses (IP · CIDR, comma-separated) whose `X-Forwarded-For` · `X-Forwarded-Proto` are trusted. **Only requests from these addresses** are believed — login lockout · audit IP · Secure cookie (`auto`) then follow the real client. Empty = trust nothing (the direct peer address) |
-| `BRAINSTORM_MODULES` | Optional modules to enable (comma list · `all` · empty = core only) — face-to-face `face` · delegations `delegations` · requests `requests` · merge up `merge` (`docs/MODULES.md`) |
+| `BRAINSTORM_MODULES` | Optional modules to enable (comma list · `all` · empty = core only) — face-to-face `face` · delegations `delegations` · requests `requests` · merge up `merge` · questions inbox `questions` (`docs/MODULES.md`) |
 | `BRAINSTORM_FACE_DRAFTER` · `BRAINSTORM_FACE_REVIEWER` | Agent ids for face-to-face mode (drafter · reviewer). Leave empty and face-to-face mode cannot be turned on |
 | Others | Size limits · lease · cancel-confirmation wait · call budget — see comments in `deploy/brainstorm.env` |
 

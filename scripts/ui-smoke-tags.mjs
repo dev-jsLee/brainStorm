@@ -36,7 +36,7 @@ w.localStorage.setItem('bs.lang', 'ko');
 const src = (f) => fs.readFileSync(new URL(`../public/${f}`, import.meta.url), 'utf8');
 w.eval(
   (await (await fetch(new URL('/i18n-dict.js', base))).text()) +
-    '\n' + ['i18n.js', 'runs.js', 'admin.js', 'claims.js', 'face.js', 'app.js'].map(src).join('\n') +
+    '\n' + ['i18n.js', 'runs.js', 'admin.js', 'claims.js', 'face.js', 'questions.js', 'app.js'].map(src).join('\n') +
     '\nwindow.__S = S; window.__route = route; window.__loadTags = loadTags;',
 );
 const $ = (id) => w.document.getElementById(id);

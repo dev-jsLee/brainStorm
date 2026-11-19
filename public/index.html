@@ -16,6 +16,7 @@
   <script src="/admin.js" defer></script>
   <script src="/claims.js" defer></script>
   <script src="/face.js" defer></script>
+  <script src="/questions.js" defer></script>
   <script src="/app.js" defer></script>
 </head>
 <body>
@@ -51,6 +52,7 @@
       <span class="menu-label sr-only" data-i18n="html.menu.main">주요 메뉴</span>
       <span class="menu-group" aria-hidden="true" data-i18n="html.menu.group.work">작업</span>
       <button type="button" class="menu-item" data-menu="convo" title="대화 작업" data-i18n-attr="title:html.menu.convo"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg><span class="mi-label" data-i18n="html.menu.convo">대화 작업</span></button>
+      <button type="button" class="menu-item" data-menu="questions" title="질문함" data-i18n-attr="title:html.menu.questions" hidden><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg><span class="mi-label" data-i18n="html.menu.questions">질문함</span><span id="q-count" class="menu-count" aria-hidden="true" hidden></span></button>
       <button type="button" class="menu-item" data-menu="runs" title="실행 상태" data-i18n-attr="title:html.menu.runs"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg><span class="mi-label" data-i18n="html.menu.runs">실행 상태</span></button>
       <span class="menu-group" aria-hidden="true" data-i18n="html.menu.group.agents">에이전트</span>
       <button type="button" class="menu-item" data-menu="sessions" title="세션 교체" data-i18n-attr="title:html.menu.sessions"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg><span class="mi-label" data-i18n="html.menu.sessions">세션 교체</span></button>
@@ -335,6 +337,19 @@
       </form>
     </section>
 
+    <section id="questions-page" class="page-sec" aria-label="질문함" data-i18n-attr="aria-label:html.menu.questions" hidden>
+      <div class="page-head">
+        <h2 id="q-h" tabindex="-1" data-i18n="html.menu.questions">질문함</h2>
+        <span class="spacer"></span>
+        <div class="q-tabs" role="group" aria-label="보기" data-i18n-attr="aria-label:html.q.view">
+          <button type="button" id="q-tab-open" aria-pressed="true" data-i18n="html.q.open">열린 질문</button>
+          <button type="button" id="q-tab-closed" aria-pressed="false" data-i18n="html.q.closed">닫힌 질문</button>
+        </div>
+        <button type="button" id="q-reload" data-i18n="html.common.reload">새로 고침</button>
+      </div>
+      <p class="muted small q-intro" data-i18n="html.q.intro">에이전트가 결정을 물을 때 여기에 올립니다. 답은 그 대화에 지시 글로 올라가 물은 에이전트를 다시 부릅니다. «나중에»는 아래로 내리기만 하고 에이전트에게는 아무것도 보내지 않습니다.</p>
+      <div id="q-list" class="q-list" aria-live="polite"></div>
+    </section>
     <section id="members-page" class="page-sec" aria-label="멤버 권한" data-i18n-attr="aria-label:html.menu.members" hidden>
       <div class="page-head">
         <h2 id="mb-h" tabindex="-1" data-i18n="html.menu.members">멤버 권한</h2>

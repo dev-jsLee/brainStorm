@@ -61,6 +61,7 @@ import {
   renderCarry,
   renderFace,
   renderHoldNotices,
+  renderOpenQuestions,
   renderPulled,
   requestRule,
   sourceLabel,
@@ -68,6 +69,7 @@ import {
   type ClaimFace,
   type ClaimHoldNotice,
   type ClaimPulled,
+  type ClaimQuestion,
 } from '../../../src/protocol.js';
 
 /** 첨부 종류 이름(언어별 · 마스터 #823) */
@@ -109,6 +111,8 @@ export function buildPrompt(p: {
   face?: ClaimFace | null;
   /** 규약·안내 언어(claim.lang · 마스터 #823) — 없으면 ko */
   lang?: string | null;
+  /** 질문함: 이 방에 내가 올린 열린 질문 — 메시지 뒤에 싣는다(글로 답했으면 내리라는 안내와 함께) */
+  openQuestions?: ClaimQuestion[] | null;
 }): string {
   const L = p.lang;
   const who = (id: string) => {
@@ -147,7 +151,8 @@ export function buildPrompt(p: {
   const carry = p.carry ? `${renderCarry(p.carry, L)}\n\n` : '';
   const pulled = p.pulled ? `${renderPulled(p.pulled, L)}\n\n` : '';
   const face = p.face ? `\n\n${renderFace(p.face, L)}` : '';
-  return head.join('\n') + carry + pulled + body.join('\n\n') + face;
+  const oq = p.openQuestions?.length ? `\n\n${renderOpenQuestions(p.openQuestions, L)}` : '';
+  return head.join('\n') + carry + pulled + body.join('\n\n') + face + oq;
 }
 
 /** OpenClaw 실행 메타 → brainStorm 에 적을 런타임·모델 문자열. 없으면 null — 추측해서 채우지 않는다 */

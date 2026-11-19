@@ -65,6 +65,7 @@ import {
 import { DEFAULT_LANG, dictionaries, languages, normLang, protocolWords, t as tr } from './i18n.js';
 import type { FaceStore } from './modules/face/store.js';
 import type { MergeStore } from './modules/merge/store.js';
+import type { QuestionStore } from './modules/questions/store.js';
 import { TagStore } from './tagstore.js';
 import { parseHold, parseRequest, toHold, type RequestStore } from './modules/requests/store.js';
 import type { DelegationStore } from './modules/delegations/store.js';
@@ -467,6 +468,8 @@ export class Store {
   requests: RequestStore | null = null;
   /** 위임 대장 모듈(src/modules/delegations) */
   delegations: DelegationStore | null = null;
+  /** 질문함 모듈(src/modules/questions) — 꺼지면 질문 경로·claim 칸·글의 질문 머리가 없다 */
+  questions: QuestionStore | null = null;
 
   constructor(
     readonly db: DB,
@@ -1476,7 +1479,14 @@ export class Store {
     const map = this.attachmentsFor(msgs.map((m) => m.seq));
     const mg = this.merge?.mergesFor(msgs.map((m) => m.seq));
     const tg = this.tags.tagsFor(msgs.map((m) => m.seq));
-    return msgs.map((m) => ({ ...m, attachments: map.get(m.seq) ?? [], tags: tg.get(m.seq) ?? { primary: [], inline: [] }, ...(mg?.has(m.seq) ? { merge: mg.get(m.seq) } : {}) }));
+    const qm = this.questions?.questionsFor(msgs.map((m) => m.seq));
+    return msgs.map((m) => ({
+      ...m,
+      attachments: map.get(m.seq) ?? [],
+      tags: tg.get(m.seq) ?? { primary: [], inline: [] },
+      ...(mg?.has(m.seq) ? { merge: mg.get(m.seq) } : {}),
+      ...(qm?.has(m.seq) ? { question: qm.get(m.seq) } : {}),
+    }));
   }
 
   /** 커서 뒤(after)로 오름차순. older 를 주면 거꾸로 — before 보다 작은 글 중 가장 최근 limit 개(before = null 이면 맨 끝부터 · 방을 열 때 최근 글만 · 마스터 #1732).
@@ -2230,6 +2240,8 @@ export class Store {
           lang: this.lang(),
           /** 마스터가 정한 이 에이전트의 모델(2026-11-04) — 없으면 null = 어댑터 기본값. 어댑터가 env 보다 먼저 쓴다 */
           model: this.agentModel(me),
+          /** 질문함(모듈 questions): 이 방에 내가 올린 열린 질문 — 어댑터가 프롬프트 끝에 붙인다 · 꺼지면 null */
+          open_questions: this.questions?.openForClaim(d.thread_id, me) ?? null,
         };
       }
       return null;

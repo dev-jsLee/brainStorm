@@ -8,9 +8,10 @@ import { faceModule } from './modules/face/index.js';
 import { delegationsModule } from './modules/delegations/index.js';
 import { requestsModule } from './modules/requests/index.js';
 import { mergeModule } from './modules/merge/index.js';
+import { questionsModule } from './modules/questions/index.js';
 
 /** 선택 모듈 이름. docs/MODULES.md */
-export const KNOWN_MODULES = ['face', 'delegations', 'requests', 'merge'] as const;
+export const KNOWN_MODULES = ['face', 'delegations', 'requests', 'merge', 'questions'] as const;
 export type ModuleId = (typeof KNOWN_MODULES)[number];
 
 /** 모듈이 받는 손잡이. Store 안쪽 중 모듈이 부르는 것은 @internal 로 표시돼 있다 */
@@ -40,7 +41,7 @@ export interface BrainstormModule {
 }
 
 /** 옮긴 모듈 — 순서대로 붙는다 */
-export const REGISTRY: BrainstormModule[] = [faceModule, delegationsModule, requestsModule, mergeModule];
+export const REGISTRY: BrainstormModule[] = [faceModule, delegationsModule, requestsModule, mergeModule, questionsModule];
 
 /** BRAINSTORM_MODULES — 쉼표 목록 · 'all' 은 전부 · 비면 core 만. 모르는 이름은 오타로 보고 시작을 멈춘다 */
 export function parseModules(s: string | undefined): ModuleId[] {

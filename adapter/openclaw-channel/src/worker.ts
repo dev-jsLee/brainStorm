@@ -10,7 +10,7 @@
 //     확인이 없으면 서버는 무응답 제한(기본 30초) 뒤 run 을 unknown 으로 둔다. 확인 전에 턴이 이미 답을 냈으면
 //     그 답을 올린다(«완료 우선 확정» — 서버가 succeeded 로 받는다). 확인 뒤의 늦은 답은 서버가 거절한다.
 //   - 토큰·본문은 로그에 남기지 않는다(식별자만).
-import type { AttachmentInfo, ClaimCarry, ClaimFace, ClaimForward, ClaimHoldNotice, ClaimPulled, ClaimSession, Message, Participant, Run } from '../../../src/protocol.js';
+import type { AttachmentInfo, ClaimCarry, ClaimFace, ClaimForward, ClaimHoldNotice, ClaimPulled, ClaimQuestion, ClaimSession, Message, Participant, Run } from '../../../src/protocol.js';
 import { t } from '../../../src/i18n.js';
 import { buildPrompt, describeActualModel, redact, selectNewContext, sessionKeyFor, stripAnswerStamp } from './mapping.js';
 
@@ -102,6 +102,8 @@ interface Claim {
   lang?: string;
   /** 에이전트별 모델(2026-11-04) — null·없음 = 어댑터 기본값 · 옛 서버는 안 보낸다 */
   model?: string | null;
+  /** 질문함(모듈 questions): 이 방에 내가 올린 열린 질문 — 옛 서버·모듈 꺼짐은 없음/null */
+  open_questions?: ClaimQuestion[] | null;
 }
 
 export class HttpError extends Error {
@@ -339,6 +341,7 @@ export class BrainstormWorker {
         requestRule: claim.request_rule ?? null,
         face: claim.face ?? null,
         lang: claim.lang ?? null,
+        openQuestions: claim.open_questions ?? null,
       });
       const author = this.participants.get(claim.trigger.author_id);
       const started = Date.now();

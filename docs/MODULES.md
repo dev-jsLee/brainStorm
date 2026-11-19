@@ -4,7 +4,7 @@
 > 필수는 core 를 수정하는 거고, 선택은 필요한 사람이 가져다 쓰는 기능들로 만드는 거야. 플러그인 같은 거지.
 > 지금 있는 기능들도 구분이 가능하면 분리작업을 진행해보자.»
 
-이 문서는 분리의 기준과 결과다. **v0.25.0 에 분리가 끝났다**(마스터 #1193·#1196·#1207·#1213): 모듈 넷(`face`·`delegations`·`requests`·`merge`)은 `src/modules/<id>/` 에 있고, `BRAINSTORM_MODULES` 에 없으면 안 붙는다.
+이 문서는 분리의 기준과 결과다. **v0.25.0 에 분리가 끝났다**(마스터 #1193·#1196·#1207·#1213): 모듈 넷(`face`·`delegations`·`requests`·`merge`)은 — v0.40.0 에 다섯째 `questions` 가 처음부터 모듈로 섰다 — `src/modules/<id>/` 에 있고, `BRAINSTORM_MODULES` 에 없으면 안 붙는다.
 
 ## 1. 가르는 기준
 
@@ -40,6 +40,7 @@
 | `delegations` | 위임 대장 — 일감과 만질 범위 선점 | `delegations`·`claims`(12) | `/api/delegations*` 8 | `claims.js` | 참여자 비활성(853–940) · WS `delegation` 알림 |
 | `requests` | 에이전트 간 «요청»(`요청→`·`보류:`) · 짝 · 사슬 깊이 | `request_pairs`·`request_holds`(14) · `messages.source_kind='request'` | `/api/request-pairs` · holds | `app.js` 일부 | 완료 처리 안의 `parseRequest`·`parseHold`(2542·2574) |
 | `merge` | 하위 스레드를 상위로 합치기 | `thread_merges`(17) | `/api/threads/:id/merge` | `app.js` 일부 | 스레드 목록에서 합친 하위 빼기 · 맥락 |
+| `questions` | 질문함 — 에이전트 질문지를 별도 창구로(v0.40.0 · 2026-11-19) | 모듈 마이그레이션 `questions` 1: `questions`·`question_items` | `/api/questions*` 9 | `questions.js` | 글의 질문 머리(`withAttachments`) · claim 칸 `open_questions` · 질문·답 글은 core `postMessage` 로 |
 
 이미 모듈식인 것: **어댑터**(`adapter/*` — 쓰는 것만 깐다) · **배포 도구**(`deploy/` · `bs-job`). 개발 도구(`design-kit`·`phase2-evidence`·`design-snapshots`)는 공개본에서 뺀다.
 

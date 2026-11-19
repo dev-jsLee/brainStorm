@@ -44,7 +44,7 @@ w.localStorage.setItem('bs.lang', process.env.BS_UI_LANG || 'ko');
 w.eval(
   (await (await fetch(new URL('/i18n-dict.js', base))).text()) +
     '\n' +
-    ['i18n.js', 'runs.js', 'admin.js', 'claims.js', 'face.js', 'app.js'].map((f) => fs.readFileSync(new URL(f, PUB), 'utf8')).join('\n') +
+    ['i18n.js', 'runs.js', 'admin.js', 'claims.js', 'face.js', 'questions.js', 'app.js'].map((f) => fs.readFileSync(new URL(f, PUB), 'utf8')).join('\n') +
     '\nwindow.__S = S;',
 );
 const $ = (id) => w.document.getElementById(id);

@@ -33,6 +33,7 @@ const STATIC: Record<string, string> = {
   '/admin.js': 'admin.js',
   '/claims.js': 'claims.js',
   '/face.js': 'face.js',
+  '/questions.js': 'questions.js',
   '/style.css': 'style.css',
   '/fonts.css': 'fonts.css',
   '/manifest.webmanifest': 'manifest.webmanifest',

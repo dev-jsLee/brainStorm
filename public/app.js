@@ -431,7 +431,7 @@ for (const b of document.querySelectorAll('.menu-item')) {
     // ≤999 에서 펼친 메뉴는 서랍 안에 있다(디자인 #782 · #1740) — 고르면 서랍을 닫는다
     if (listDrawer() && document.body.classList.contains('show-sidebar')) setDrawer(false);
     if (m === 'logout') return $('logout-btn').click();
-    if (m === 'runs' || m === 'audit' || m === 'agents') {
+    if (m === 'runs' || m === 'audit' || m === 'agents' || m === 'questions') {
       location.hash = m;
       return;
     }
@@ -721,7 +721,7 @@ window.addEventListener('hashchange', () => {
 function parseHash() {
   const h = location.hash.slice(1);
   if (h === 'runs' || h.startsWith('runs?')) return { page: 'runs', q: new URLSearchParams(h.slice(5)) };
-  for (const pg of ['audit', 'agents', 'members']) if (h === pg || h.startsWith(`${pg}?`)) return { page: pg, q: new URLSearchParams(h.slice(pg.length + 1)) };
+  for (const pg of ['audit', 'agents', 'members', 'questions']) if (h === pg || h.startsWith(`${pg}?`)) return { page: pg, q: new URLSearchParams(h.slice(pg.length + 1)) };
   const m = /^run\/([^/?]+)(\/cancel)?$/.exec(h);
   if (m) return { page: m[2] ? 'cancel' : 'run', id: decodeURIComponent(m[1]) };
   const tg = /^tag\/([^/?]+)$/.exec(h);
@@ -742,6 +742,7 @@ function setMode(mode) {
   $('audit-page').hidden = mode !== 'audit';
   $('agents-page').hidden = mode !== 'agents';
   $('members-page').hidden = mode !== 'members';
+  $('questions-page').hidden = mode !== 'questions';
   $('tag-page').hidden = mode !== 'tag';
   if (mode !== 'tag') S.tagCur = null;
   if (page) setDrawer(false);
@@ -764,6 +765,10 @@ async function route() {
   if (r.page === 'tag') {
     setMode('tag');
     return showTag(r.id);
+  }
+  if (r.page === 'questions') {
+    setMode('questions');
+    return showQuestions(r.q);
   }
   if (r.page === 'audit' || r.page === 'agents' || r.page === 'members') {
     setMode(r.page);
@@ -942,11 +947,11 @@ function renderRecipients() {
   const box = $('recipients');
   // 기본 수신 대상(마스터 #1535 «직전에 대화한 상대» · «수신 대상은 항상 켜 둔다»): 이 화면에서 칩을 만졌으면 그것 →
   // 이 대화에서 내가 마지막으로 누군가에게 보낸 글의 수신자(메모 글은 건너뜀) → 마지막으로 말한 에이전트 →
-  // 대화에 정해 둔 기본 수신자 → 에이전트가 하나뿐이면 그 에이전트 → 백구
+  // 대화에 정해 둔 기본 수신자 → 에이전트가 하나뿐이면 그 에이전트 → 대표 에이전트(태그 등록부 · 마스터가 정함)
   const ids = new Set(agents.map((a) => a.participant_id));
   const sole = d.members.filter((m) => m.kind === 'agent').length === 1 && agents.length === 1 ? agents[0].participant_id : null;
   const kept = S.rcptPick?.thread === d.thread.id ? S.rcptPick : null;
-  const fallback = [d.thread.default_recipient, sole, 'baekgu'].find((x) => x && ids.has(x));
+  const fallback = [d.thread.default_recipient, sole, S.defaultAgent].find((x) => x && ids.has(x));
   const pickSet = new Set(kept ? kept.to : lastPartners(ids) ?? (fallback ? [fallback] : []));
   const chip = (value, label, checked, { key, ...extra } = {}) => {
     const input = el('input', { type: 'checkbox', value, checked, ...extra });
@@ -1391,6 +1396,7 @@ function msgEl(m, inherited) {
   body._src = m.body;
   if (m.merge) body.append(mergeBox(m));
   else fillBody(body, m.body, isPlain(S.cur));
+  const qMini = inherited ? null : questionMini(m);
   const list = m.attachments ?? [];
   const imgs = list.filter((a) => a.kind === 'image');
   const files = list.filter((a) => a.kind !== 'image');
@@ -1419,7 +1425,7 @@ function msgEl(m, inherited) {
     'article',
     { class: `msg${agent ? ' agent' + agentTone(m.author_id) : ''}${mine ? ' mine' : ''}${inherited ? ' inherited' : ''}`, id: inherited ? `c${m.seq}` : `m${m.seq}`, 'aria-label': `${pname(m.author_id)} #${m.seq}` },
     el('span', { class: 'avatar', 'aria-hidden': 'true' }, initials(m.author_id)),
-    el('div', { class: 'main' }, head, tagLine, body, ...atts, inherited ? null : el('div', { class: 'runlines', 'data-seq': String(m.seq) }), bar),
+    el('div', { class: 'main' }, head, tagLine, body, qMini, ...atts, inherited ? null : el('div', { class: 'runlines', 'data-seq': String(m.seq) }), bar),
   );
 }
 // ───── 태그(마이그레이션 19 · 마스터 #1475): 글의 태그 칩 · 사이드바 목록 · 태그 보기 페이지(#tag/<id> · 1단계는 읽기 전용 보기) ─────
@@ -3270,6 +3276,8 @@ function connectWs() {
       refreshRunsPage();
     } else if (n.t === 'delegation') {
       onDelegationNotice();
+    } else if (n.t === 'question') {
+      onQuestionNotice(n);
     } else if (n.t === 'face' && n.thread_id === S.cur) {
       if (faceActive()) loadFace().catch(() => {});
     }
@@ -3370,6 +3378,7 @@ if (typeof matchMedia === 'function') {
 }
 
 // ───── 시작 ─────
+initQuestions(); // 질문함 화면 단추(public/questions.js)
 async function boot() {
   let me;
   try {
@@ -3383,6 +3392,8 @@ async function boot() {
   // 꺼진 모듈의 자리는 안 그린다(선점 탭 = delegations)
   const dlgOn = S.modules.has('delegations');
   document.querySelector('.menu-item[data-menu="claims"]').hidden = !dlgOn;
+  // 질문함(모듈 questions): 메뉴와 열린 수
+  document.querySelector('.menu-item[data-menu="questions"]').hidden = !S.modules.has('questions');
   $('tabbtn-claims').hidden = !dlgOn;
   $('me').textContent = S.me.name;
   $('logout-btn').hidden = false;
@@ -3395,6 +3406,7 @@ async function boot() {
   setAux(!auxOverlays() && store('bs.aux-open') === '1', S.tab);
   await loadThreads();
   loadTags().catch(() => {});
+  loadQBadge();
   queueLive();
   loadAgents();
   connectWs();

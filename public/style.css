@@ -831,3 +831,43 @@ button.linkish { background: none; border: 0; padding: 0; cursor: pointer; text-
 .msg.flash { animation: seq-flash 1.6s ease-out; }
 @keyframes seq-flash { from { background: color-mix(in srgb, var(--accent) 22%, transparent); } to { background: transparent; } }
 @media (prefers-reduced-motion: reduce) { .msg.flash { animation: none; outline: 2px solid var(--accent); } }
+
+/* ───── 질문함(모듈 questions · 2026-11-19) — 메뉴 열린 수 · 한 장짜리 화면 · 글 안 축소 카드 ───── */
+.menu-item[data-menu="questions"] { position: relative; }
+.menu-count { margin-left: auto; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--accent); color: var(--bg); font-size: 11px; line-height: 18px; text-align: center; font-weight: 600; }
+@media (min-width: 1000px) {
+  body.rail-collapsed .menu-count { position: absolute; top: 2px; right: 0; margin: 0; min-width: 15px; height: 15px; line-height: 15px; padding: 0 3px; font-size: 10px; }
+}
+.q-tabs { display: inline-flex; gap: 0; }
+.q-tabs button { border-radius: 0; }
+.q-tabs button:first-child { border-radius: 4px 0 0 4px; }
+.q-tabs button:last-child { border-radius: 0 4px 4px 0; margin-left: -1px; }
+.q-tabs button[aria-pressed="true"] { color: var(--accent-700); border-color: var(--accent); background: var(--active); font-weight: 600; position: relative; }
+.q-intro { margin: -8px 0 16px; max-width: 70ch; }
+.q-list { display: flex; flex-direction: column; gap: 14px; max-width: 860px; }
+.q-card { background: var(--card); }
+.q-card.focus { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.q-card.st-snoozed { opacity: .82; border-style: dashed; }
+.q-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; }
+.q-head .spacer, .q-closed .spacer { flex: 1; }
+.badge.q-st.st-open { color: var(--accent-700); border-color: var(--accent); }
+.badge.q-st.st-answered, .badge.q-st.st-answered_in_chat { color: var(--ok); border-color: currentColor; }
+.q-item { border: none; border-top: 1px solid var(--line-soft); margin: 0; padding: 10px 0 2px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.q-item legend { padding: 0; font-weight: 600; line-height: 1.45; float: left; width: 100%; margin-bottom: 4px; }
+.q-item legend .pill { margin-right: 4px; vertical-align: 2px; }
+.q-opt { display: flex; align-items: baseline; gap: 8px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 4px; cursor: pointer; flex-wrap: wrap; }
+.q-opt:hover { background: var(--hover); }
+.q-opt:has(input:checked) { border-color: var(--accent); background: var(--active); }
+.q-opt.rec .q-lbl { font-weight: 600; }
+.q-opt input[type="radio"], .q-opt input[type="checkbox"] { flex: none; margin: 0; transform: translateY(1px); }
+.q-desc { flex-basis: 100%; padding-left: 24px; font-size: 13px; }
+.q-own { cursor: text; }
+.q-own .q-text { flex: 1; min-width: 160px; }
+.q-ans { margin: 0; color: var(--muted); }
+.q-note { width: 100%; resize: vertical; font: inherit; }
+.q-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.q-actions button.danger { color: var(--danger); }
+.q-closed { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; padding-top: 8px; border-top: 1px solid var(--line-soft); }
+.q-mini { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 8px; padding: 6px 10px; border: 1px dashed var(--accent); border-radius: 4px; font-size: 13px; }
+.q-mini:not(.st-open):not(.st-snoozed) { border-color: var(--line); color: var(--muted); }
+.q-mini button { font-size: 12px; padding: 2px 10px; }

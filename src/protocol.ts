@@ -202,6 +202,8 @@ export interface Message {
   merge?: MergeInfo | null;
   /** 태그 보기(마이그레이션 19): 주 태그(≤2)·인라인 — 등록된 것만 · 없으면 둘 다 빈 배열 */
   tags?: MessageTags;
+  /** 질문함(모듈 questions): 이 글이 에이전트의 «질문» 글이면 그 질문의 머리 — 화면이 축소 카드를 단다 */
+  question?: MessageQuestion | null;
 }
 
 export interface TagRef {
@@ -330,7 +332,8 @@ export type WsNotice =
   | { t: 'thread'; thread_id: string }
   | { t: 'delivery'; thread_id: string }
   | { t: 'delegation'; id: string; status: DelegationStatus }
-  | { t: 'face'; thread_id: string; round_id: string; state: FaceState };
+  | { t: 'face'; thread_id: string; round_id: string; state: FaceState }
+  | { t: 'question'; id: string; thread_id: string; status: QuestionStatus };
 
 /** 어댑터 claim 응답의 세션 부분. 어댑터는 seen_seq 뒤의 맥락만 새로 넘기면 된다. */
 export interface ClaimSession {
@@ -673,4 +676,94 @@ export function renderFace(f: ClaimFace, lang?: string | null): string {
       );
   }
   return out.join('\n\n');
+}
+
+// ───────────────────────── 질문함(모듈 questions · 2026-11-19) ─────────────────────────
+
+/** 질문 상태 — open·snoozed(나중에) 는 아직 열린 것, 나머지는 닫힘 */
+export type QuestionStatus = 'open' | 'snoozed' | 'answered' | 'answered_in_chat' | 'superseded' | 'obsolete' | 'dismissed';
+export type QuestionItemStatus = 'open' | 'answered' | 'answered_in_chat' | 'superseded' | 'obsolete' | 'dismissed';
+export const QUESTION_OPEN: readonly QuestionStatus[] = ['open', 'snoozed'];
+
+export interface QuestionOption {
+  label: string;
+  description: string | null;
+}
+
+/** 문항의 답 — 마스터가 골랐으면 choices·text, 에이전트가 글에서 읽어 냈으면 inferred·by_msg_seq */
+export interface QuestionItemAnswer {
+  choices: number[];
+  text: string | null;
+  inferred: string | null;
+  by_msg_seq: number | null;
+}
+
+export interface QuestionItem {
+  idx: number;
+  header: string | null;
+  question: string;
+  multi: boolean;
+  allow_text: boolean;
+  /** 추천안이 있으면 늘 첫 자리(0) — 서버가 올릴 때 옮긴다 */
+  options: QuestionOption[];
+  recommended: number | null;
+  status: QuestionItemStatus;
+  answer: QuestionItemAnswer | null;
+  answered_at: number | null;
+}
+
+export interface Question {
+  id: string;
+  thread_id: string;
+  thread_title: string | null;
+  asker_id: string;
+  /** 질문 글(스레드 안 «질문» 글)의 번호 */
+  message_seq: number | null;
+  status: QuestionStatus;
+  created_at: number;
+  updated_at: number;
+  closed_at: number | null;
+  closed_by: string | null;
+  /** 덧붙임(마스터 답) 또는 닫은 사유 설명(에이전트) */
+  note: string | null;
+  /** 답·필요 없음·다시 열기로 서버가 만든 지시 글 */
+  answer_seq: number | null;
+  /** 에이전트가 «글로 답함»으로 읽은 마스터 글 */
+  by_msg_seq: number | null;
+  superseded_by: string | null;
+  items: QuestionItem[];
+  /** 질문 글 뒤에 그 방에 쌓인 글 수(낡음 표시) */
+  after_count: number;
+}
+
+/** 글에 붙는 질문 머리(축소 카드) */
+export interface MessageQuestion {
+  id: string;
+  status: QuestionStatus;
+  items: number;
+}
+
+/** claim 에 실리는 이 방의 내 열린 질문(어댑터가 프롬프트 끝에 붙인다) */
+export interface ClaimQuestion {
+  id: string;
+  seq: number | null;
+  status: 'open' | 'snoozed';
+  items: { idx: number; header: string | null; question: string; options: string[]; recommended: number | null; multi: boolean; status: QuestionItemStatus }[];
+}
+
+/** 열린 질문 목록을 프롬프트 텍스트로(어댑터 공통). 없으면 빈 글 */
+export function renderOpenQuestions(list: ClaimQuestion[] | null | undefined, lang?: string | null): string {
+  if (!list?.length) return '';
+  const out = [t(lang, 'prompt.open_q_head')];
+  for (const q of list) {
+    const st = t(lang, q.status === 'snoozed' ? 'prompt.open_q_snoozed' : 'prompt.open_q_open');
+    out.push(`- ${q.id}${q.seq != null ? ` · #${q.seq}` : ''} · ${st}`);
+    for (const it of q.items) {
+      const opts = it.options.map((o, i) => `${i + 1}) ${o}${i === it.recommended ? ` ${t(lang, 'prompt.open_q_rec')}` : ''}`).join(' / ');
+      const closed = it.status === 'open' ? '' : ` · ${t(lang, 'prompt.open_q_item_closed')}`;
+      out.push(`  ${it.idx + 1}. ${it.header ? `[${it.header}] ` : ''}${it.question}${opts ? ` — ${opts}` : ''}${closed}`);
+    }
+  }
+  out.push(t(lang, 'prompt.open_q_hint'));
+  return out.join('\n');
 }
