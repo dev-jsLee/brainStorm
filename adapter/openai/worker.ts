@@ -77,6 +77,8 @@ interface Claim {
   face?: ClaimFace | null;
   /** 규약·안내 언어(마스터 #823) — 옛 서버는 안 보낸다(ko) */
   lang?: string;
+  /** 에이전트별 모델(2026-11-04) — 있으면 OPENAI 설정 모델보다 먼저 */
+  model?: string | null;
 }
 
 export interface ChatResult {
@@ -198,10 +200,10 @@ export class OpenAIWorker {
   }
 
   /** chat completions 한 번. 스트리밍이면 조각을 모아 끝난 뒤 돌려준다 */
-  async chat(messages: ChatMessage[], signal: AbortSignal, onProgress?: (note: string) => void, lang?: string): Promise<ChatResult> {
+  async chat(messages: ChatMessage[], signal: AbortSignal, onProgress?: (note: string) => void, lang?: string, model?: string): Promise<ChatResult> {
     const started = Date.now();
     const body: Record<string, unknown> = {
-      model: this.o.model,
+      model: model || this.o.model,
       messages,
       max_tokens: this.o.maxTokens,
       stream: this.o.stream,
@@ -392,7 +394,7 @@ export class OpenAIWorker {
       const started = Date.now();
       let r: ChatResult;
       try {
-        r = await this.chat(built.messages, ac.signal, (n) => (progress = n), claim.lang);
+        r = await this.chat(built.messages, ac.signal, (n) => (progress = n), claim.lang, claim.model ?? undefined);
       } catch (e) {
         if (cancelled || lost) {
           this.o.log.info(`턴 멈춤 run=${runId} (${cancelled ? '취소' : '소유 잃음'}) — 답을 올리지 않는다`);
@@ -420,7 +422,7 @@ export class OpenAIWorker {
       if (r.finishReason === 'length') body += `\n\n${t(claim.lang, 'prompt.oa.max_tokens_cut')}`;
       const usage = compactUsage({
         openai: {
-          model_requested: this.o.model,
+          model_requested: claim.model || this.o.model,
           model: r.model,
           stream: this.o.stream,
           finish_reason: r.finishReason,

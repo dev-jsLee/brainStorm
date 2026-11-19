@@ -12,7 +12,7 @@
 //   CLAUDE_BIN              claude 실행 파일(기본 claude)
 //   CLAUDE_CWD              작업 디렉터리 — 그 CLAUDE.md 가 읽힌다(기본 현재 디렉터리)
 //   CLAUDE_CONFIG_DIR       Claude Code 설정 디렉터리(기본 ~/.claude) — 세션 파일로 resume 을 가른다
-//   CLAUDE_MODEL            (선택) 모델
+//   CLAUDE_MODEL            (선택) 모델 — 기본값. brainStorm 관리 화면에서 정한 에이전트 모델(claim.model)이 있으면 그쪽이 먼저
 //   CLAUDE_EXTRA_ARGS       (선택) 권한 등 그 밖의 인자, 공백으로 가름 — 예: --permission-mode bypassPermissions
 //   CLAUDE_APPEND_PROMPT_FILE (선택) 시스템 프롬프트에 덧붙일 글 파일. 없으면 기본 문구
 //   CLAUDE_TIMEOUT_MS       한 턴 최대(기본 1800000 = 30분)

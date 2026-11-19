@@ -215,7 +215,7 @@ export function makeClaudeRunner(o: ClaudeRunnerOptions): RunTurn {
 function runOnce(o: ClaudeRunnerOptions, req: TurnRequest, uuid: string, resume: boolean): Promise<TurnResult> {
   return new Promise<TurnResult>((resolve, reject) => {
     const append = typeof o.appendSystemPrompt === 'function' ? o.appendSystemPrompt(req.lang) : o.appendSystemPrompt;
-    const child = spawn(o.bin, buildArgs({ ...o, appendSystemPrompt: append }, uuid, resume), {
+    const child = spawn(o.bin, buildArgs({ ...o, model: req.model || o.model, appendSystemPrompt: append }, uuid, resume), {
       cwd: o.cwd,
       env: { ...(o.env ?? process.env), ...(req.threadId ? { BRAINSTORM_THREAD_ID: req.threadId } : {}), BRAINSTORM_RUN_ID: req.runId },
       stdio: ['pipe', 'pipe', 'pipe'],

@@ -21,9 +21,9 @@
 <body>
   <a class="skip" href="#body" data-i18n="html.skip">작성란으로 건너뛰기</a>
   <header class="top">
-    <button id="menu-btn" class="icon" aria-label="대화 목록 열기" data-i18n-attr="aria-label:html.top.menuOpen" aria-controls="sidebar" aria-expanded="false"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="4" x2="20" y1="12" y2="12"/><line x1="4" x2="20" y1="6" y2="6"/><line x1="4" x2="20" y1="18" y2="18"/></svg></button>
+    <button id="menu-btn" class="icon" aria-label="대화 목록 열기" data-i18n-attr="aria-label:html.top.menuOpen" aria-controls="nav" aria-expanded="false"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="4" x2="20" y1="12" y2="12"/><line x1="4" x2="20" y1="6" y2="6"/><line x1="4" x2="20" y1="18" y2="18"/></svg></button>
     <!-- 메뉴 접기(디자인 #782) — 넓은 화면에서 메뉴를 아이콘 줄로. 이 브라우저에 기억 -->
-    <button id="rail-btn" class="icon" type="button" aria-controls="menu" aria-expanded="true" aria-label="메뉴 접기" title="메뉴 접기" data-i18n-attr="aria-label:html.top.railCollapse;title:html.top.railCollapse"><svg class="i-close" viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="m16 15-3-3 3-3"/></svg><svg class="i-open" viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="m14 9 3 3-3 3"/></svg></button>
+    <button id="rail-btn" class="icon" type="button" aria-controls="nav" aria-expanded="true" aria-label="메뉴 접기" title="메뉴 접기" data-i18n-attr="aria-label:html.top.railCollapse;title:html.top.railCollapse"><svg class="i-close" viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="m16 15-3-3 3-3"/></svg><svg class="i-open" viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="m14 9 3 3-3 3"/></svg></button>
     <strong class="brand">brain<i>Storm</i></strong>
     <span id="conn" class="conn off" role="status" aria-live="polite" title="실시간 연결 상태" data-i18n="html.top.connOff" data-i18n-attr="title:html.top.connTitle">연결 안 됨</span>
     <span class="spacer"></span>
@@ -45,6 +45,8 @@
   </main>
 
   <main id="app-view" class="work" hidden>
+    <!-- 한 사이드바(마스터 #1740 · Claude WebUI 꼴): 위에 주요 메뉴, 아래에 대화 목록(목록만 스크롤). 접으면 64px 아이콘 줄 · ≤999 는 ☰ 서랍 -->
+    <div id="nav">
     <nav id="menu" aria-label="주요 메뉴" data-i18n-attr="aria-label:html.menu.main">
       <span class="menu-label sr-only" data-i18n="html.menu.main">주요 메뉴</span>
       <span class="menu-group" aria-hidden="true" data-i18n="html.menu.group.work">작업</span>
@@ -73,6 +75,17 @@
       </section>
       <section class="side-sec">
         <div class="sec-row">
+          <h3 class="sec" data-i18n="html.side.tags">태그</h3>
+          <span class="sec-tools">
+            <button type="button" id="tag-new" class="link small" hidden data-i18n="html.side.tagNew">+ 새 태그</button>
+            <label class="small"><input type="checkbox" id="tag-show-archived"> <span data-i18n="html.side.tagsArchived">보관 포함</span></label>
+          </span>
+        </div>
+        <nav id="tag-list" aria-label="태그" data-i18n-attr="aria-label:html.side.tags"></nav>
+        <label id="tag-default-row" class="small muted" hidden><span data-i18n="html.side.defaultAgent">대표 에이전트</span> <select id="tag-default-agent" aria-label="대표 에이전트" data-i18n-attr="aria-label:html.side.defaultAgent"></select></label>
+      </section>
+      <section class="side-sec side-threads">
+        <div class="sec-row">
           <h3 class="sec" data-i18n="html.side.threads">스레드</h3>
           <span class="sec-tools">
             <button type="button" id="tree-toggle-all" class="link small" title="분기 스레드를 모두 접거나 펼칩니다" data-i18n="html.side.collapseAll" data-i18n-attr="title:html.side.collapseAllTitle">모두 접기</button>
@@ -89,6 +102,8 @@
       </section>
       <p class="keys muted small" data-i18n="html.side.keys">단축키: Alt+1~9 수신 대상 켜고 끄기(칩 순서) · Alt+0 전체 · Enter·Ctrl+Enter 보내기 · Shift+Enter 줄바꿈</p>
     </aside>
+    <div id="nav-foot"></div>
+    </div>
 
     <section id="convo" aria-label="대화" data-i18n-attr="aria-label:html.convo.label">
       <div id="empty" class="muted pad" data-i18n="html.convo.loading">대화를 불러오는 중…</div>
@@ -168,6 +183,7 @@
             <span id="c-target" class="c-target"></span>
           </div>
           <div id="reply-info" class="muted small" hidden></div>
+          <div id="tag-pick" class="chips tag-pick" role="group" aria-label="태그" data-i18n-attr="aria-label:html.composer.tags" hidden></div>
           <div id="recipients" class="chips" role="group" aria-label="수신 대상" data-i18n-attr="aria-label:html.composer.recipients"></div>
           <label class="sr-only" for="body" data-i18n="html.composer.input">메시지 입력</label>
           <div id="att-list" class="att-list" hidden></div>
@@ -293,6 +309,32 @@
       <div id="ag-list" class="ag-list"></div>
     </section>
 
+    <section id="tag-page" class="page-sec" aria-label="태그 보기" data-i18n-attr="aria-label:html.tag.label" hidden>
+      <div class="page-head">
+        <h2 id="tg-h" tabindex="-1">#</h2>
+        <span id="tg-meta" class="muted small"></span>
+        <span class="spacer"></span>
+        <button type="button" id="tg-reload" data-i18n="html.common.reload">새로 고침</button>
+      </div>
+      <p id="tg-readonly" class="note-box small" hidden data-i18n="html.tag.readonly">보관한 태그입니다 — 읽기만 됩니다. 새 글에 주 태그로 붙일 수 없고 노트 최신화도 돌지 않습니다.</p>
+      <p id="tg-empty" class="muted small" hidden data-i18n="html.tag.empty">이 태그가 붙은 글이 아직 없습니다.</p>
+      <div id="tg-admin" class="tg-admin small" hidden>
+        <label><span data-i18n="html.tag.owner">담당자</span> <select id="tg-owner" aria-label="담당자" data-i18n-attr="aria-label:html.tag.owner"></select></label>
+        <button type="button" id="tg-archive" class="small"></button>
+      </div>
+      <div id="tg-msgs" class="tg-msgs" role="log" aria-label="태그가 붙은 글"></div>
+      <form id="tg-compose" class="tg-compose" hidden>
+        <div id="tg-reply" class="tg-reply small muted" hidden></div>
+        <textarea id="tg-body" rows="3" placeholder="이 태그로 글쓰기 — 루트 채팅방에 들어가고 이 태그가 붙습니다" data-i18n-attr="placeholder:html.tag.composePh"></textarea>
+        <div class="tg-compose-row">
+          <label class="small"><span data-i18n="html.tag.to">수신</span> <select id="tg-to"></select></label>
+          <span class="spacer"></span>
+          <span id="tg-send-st" class="small muted" role="status" aria-live="polite"></span>
+          <button type="submit" id="tg-send" class="primary" data-i18n="html.tag.send">보내기</button>
+        </div>
+      </form>
+    </section>
+
     <section id="members-page" class="page-sec" aria-label="멤버 권한" data-i18n-attr="aria-label:html.menu.members" hidden>
       <div class="page-head">
         <h2 id="mb-h" tabindex="-1" data-i18n="html.menu.members">멤버 권한</h2>
@@ -354,6 +396,7 @@
       </div>
     </aside>
     <div id="backdrop" hidden></div>
+    <button type="button" id="to-bottom" class="to-bottom" hidden aria-label="가장 아래로" title="가장 아래로" data-i18n-attr="aria-label:html.toBottom;title:html.toBottom"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14"/><path d="m19 12-7 7-7-7"/></svg></button>
   </main>
 
   <!-- 스레드 생성 2단계 -->

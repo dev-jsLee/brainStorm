@@ -17,7 +17,7 @@
   --font-body: "Lora", "Noto Serif KR", "AppleMyungjo", "Nanum Myeongjo", serif;
   --font-head: "Cormorant Garamond", "Noto Serif KR", "AppleMyungjo", "Nanum Myeongjo", serif;
   --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  --top-h: 56px; --rail: 200px; --side-w: 264px; --aux-w: 340px;
+  --top-h: 56px; --nav-w: 272px; --aux-w: 340px;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
@@ -47,6 +47,17 @@
 html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); font: 14px/1.55 var(--font-body); }
 body { overflow: hidden; }
 ::selection { background: color-mix(in srgb, var(--accent) 28%, transparent); }
+/* 세로 스크롤바(마스터 #1747) — 기본 회색 막대 대신 가는 알약: 길은 비우고 손잡이만 옅게, 칸에 마우스가 오면 진해지고 잡으면 금색.
+   Chrome·Edge·Safari 는 ::-webkit-scrollbar · Firefox 는 표준 scrollbar-color(Chrome 121+ 는 표준 속성이 있으면 webkit 꾸밈을 무시해서 Firefox 에만 준다) */
+:root { --sb-thumb: color-mix(in srgb, var(--fg) 16%, transparent); --sb-thumb-hover: color-mix(in srgb, var(--fg) 32%, transparent); --sb-thumb-active: color-mix(in srgb, var(--accent) 70%, transparent); }
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track, ::-webkit-scrollbar-corner { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--sb-thumb); background-clip: padding-box; border: 3px solid transparent; border-radius: 999px; min-height: 36px; }
+:hover::-webkit-scrollbar-thumb { background-color: var(--sb-thumb-hover); }
+::-webkit-scrollbar-thumb:hover { background-color: color-mix(in srgb, var(--fg) 42%, transparent); border-width: 2px; }
+::-webkit-scrollbar-thumb:active { background-color: var(--sb-thumb-active); border-width: 2px; }
+::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
+@supports not selector(::-webkit-scrollbar) { * { scrollbar-width: thin; scrollbar-color: var(--sb-thumb-hover) transparent; } }
 button, input, select, textarea { font: inherit; color: inherit; }
 svg { flex: none; }
 /* 버튼은 모두 외곽선 — 주 버튼도 칠하지 않는다(금색 테두리 + 금색 글자) */
@@ -123,29 +134,39 @@ body.rail-collapsed #rail-btn .i-close { display: none; }
 .conn.off::before { background: transparent; border: 1px solid var(--wait); }
 #me { font-size: 13px; }
 
-/* ── 4열 작업 화면: 메뉴 · 대화 목록 · 대화 · 보조 패널 ── */
-body.rail-collapsed { --rail: 64px; }
-.work { display: grid; height: calc(100% - var(--top-h)); grid-template-columns: var(--rail) var(--side-w) minmax(0, 1fr); grid-template-areas: "menu side convo"; }
-.work.aux-open { grid-template-columns: var(--rail) var(--side-w) minmax(0, 1fr) var(--aux-w); grid-template-areas: "menu side convo aux"; }
-#menu { grid-area: menu; background: var(--bg); border-right: 1px solid var(--line); padding: 18px 12px 14px; display: flex; flex-direction: column; gap: 2px; overflow-y: auto; overflow-x: hidden; }
-.menu-group { font-size: 11px; letter-spacing: .14em; color: var(--faint); padding: 14px 12px 6px; white-space: nowrap; }
-.menu-group:first-of-type { padding-top: 2px; }
-.menu-item { justify-content: flex-start; gap: 12px; border: none; background: none; min-height: 36px; padding: 0 12px; color: var(--fg); font-size: 14px; border-radius: 4px; }
+/* ── 한 사이드바(마스터 #1740 · Claude WebUI 꼴): #nav = 주요 메뉴(위 · 고정) + 대화 목록(아래 · 목록만 스크롤) │ 대화 │ 보조 패널 ── */
+.work { display: grid; height: calc(100% - var(--top-h)); grid-template-columns: var(--nav-w) minmax(0, 1fr); grid-template-areas: "nav convo"; }
+.work.aux-open { grid-template-columns: var(--nav-w) minmax(0, 1fr) var(--aux-w); grid-template-areas: "nav convo aux"; }
+/* 키가 낮아 목록 자리(240px)가 안 나오면 사이드바 전체가 스크롤된다 */
+#nav { grid-area: nav; min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--bg); border-right: 1px solid var(--line); overflow-y: auto; overflow-x: hidden; }
+#menu { flex: none; padding: 14px 10px 10px; display: flex; flex-direction: column; gap: 1px; }
+.menu-group { font-size: 11px; letter-spacing: .08em; color: var(--faint); padding: 12px 12px 4px; white-space: nowrap; }
+.menu-label + .menu-group { padding-top: 2px; }
+.menu-item { justify-content: flex-start; gap: 12px; border: none; background: none; min-height: 34px; padding: 0 12px; color: var(--fg); font-size: 14px; border-radius: 4px; }
 .menu-item svg { color: color-mix(in srgb, var(--fg) 75%, transparent); }
 .menu-item.active { color: var(--accent-700); background: var(--active); font-weight: 600; }
 .menu-item.active svg { color: var(--accent-700); }
 .mi-label { overflow: hidden; text-overflow: ellipsis; }
-/* 접힌 메뉴(64px): 아이콘만 · 그룹 사이는 헤어라인 · 이름은 title·aria(버튼 안 글자는 화면 읽기용으로 남는다) */
-body.rail-collapsed #menu { padding: 14px 12px; align-items: center; }
-body.rail-collapsed .menu-item { width: 40px; height: 40px; min-height: 40px; padding: 0; justify-content: center; }
-body.rail-collapsed .mi-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
-body.rail-collapsed .menu-group { font-size: 0; padding: 0; margin: 8px 6px; width: 28px; border-top: 1px solid var(--line); }
-body.rail-collapsed .menu-group:first-of-type { display: none; }
-#sidebar { grid-area: side; border-right: 1px solid var(--line); overflow-y: auto; padding: 22px 16px 16px; display: flex; flex-direction: column; gap: 11px; background: var(--bg); }
-.side-head { display: flex; align-items: center; }
-.side-head h2 { flex: 1; font-size: 22px; }
+#sidebar { flex: 1 1 auto; min-height: 240px; overflow-y: auto; overflow-x: hidden; padding: 12px 10px 14px; display: flex; flex-direction: column; gap: 8px; border-top: 1px solid var(--line); }
+#nav-foot { flex: none; margin-top: auto; border-top: 1px solid var(--line); padding: 6px 0; }
+#nav-foot:empty { display: none; }
+/* «대화 목록» 제목은 화면 읽기용으로만 — 절 머리(채팅방·태그·스레드)가 Claude 의 «Recents» 자리 · 닫기는 ☰·Esc·바깥 누름 */
+.side-head { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+#side-close { display: none; }
+/* 접힌 사이드바(64px): 메뉴 아이콘만 · 그룹 사이는 헤어라인 · 대화 목록은 숨김 · 이름은 title·aria(버튼 안 글자는 화면 읽기용으로 남는다)
+   ≥1000 은 #rail-btn 으로 접고(body.rail-collapsed), 761–999 는 ☰ 서랍이 닫혀 있는 동안 늘 이 꼴 */
+@media (min-width: 1000px) {
+  body.rail-collapsed { --nav-w: 64px; }
+  body.rail-collapsed #menu { padding: 14px 12px; align-items: center; }
+  body.rail-collapsed .menu-item { width: 40px; height: 40px; min-height: 40px; padding: 0; justify-content: center; }
+  body.rail-collapsed .mi-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  body.rail-collapsed .menu-group { font-size: 0; padding: 0; margin: 8px 6px; width: 28px; border-top: 1px solid var(--line); }
+  body.rail-collapsed .menu-label + .menu-group { display: none; }
+  body.rail-collapsed #sidebar { display: none !important; }
+  body.rail-collapsed .menu-lang { padding: 6px 4px; }
+}
 #search { width: 100%; height: 36px; padding-left: 32px; background: transparent url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='1.6' stroke-linecap='round'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cpath d='m20 20-3.5-3.5'/%3E%3C/svg%3E") no-repeat 10px center / 15px; }
-.sec { font-size: 11px; letter-spacing: .14em; color: var(--faint); font-weight: 400; margin: 6px 0 2px 4px; }
+.sec { font-size: 11px; letter-spacing: .08em; color: var(--faint); font-weight: 400; margin: 6px 0 2px 8px; }
 .sec-row { display: flex; align-items: center; justify-content: space-between; }
 .sec-row select { font-size: 12px; padding: 2px 6px; }
 .conv-item { display: block; padding: 9px 12px; border-radius: 4px; text-decoration: none; color: inherit; border: 1px solid transparent; }
@@ -212,8 +233,10 @@ body.rail-collapsed .menu-group:first-of-type { display: none; }
 /* 미리보기는 폭과 상관없이 세 줄로 접고 눌러야 펼친다 · 펼친 목록도 화면의 1/3(마스터 #721 좁은 화면 → #751 모든 폭) */
 .context-last { margin: 6px 28px 0; font-size: 13.5px; max-height: 4.2em; overflow: hidden; cursor: pointer; border-left: 1px solid var(--accent); padding-left: 12px; -webkit-mask-image: linear-gradient(#000 55%, transparent); mask-image: linear-gradient(#000 55%, transparent); }
 .context-last .msg { padding: 2px 0; }
-#messages { flex: 1; overflow-y: auto; padding: 4px 28px 8px; min-height: 0; }
+#messages { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 4px 28px 8px; min-height: 0; } /* 가로 스크롤바 없앰(마스터 #1700) — 넓은 표·코드는 제 칸 안에서 가로로 민다 */
 #messages:focus-visible { outline-offset: -2px; }
+.older-bar { text-align: center; padding: 6px 0 10px; font-size: 13px; } /* 옛 글 이어 받기(마스터 #1732) */
+.older-bar.busy button { opacity: .6; cursor: progress; }
 #pending { padding: 0 28px; }
 .empty-thread { margin: 14px 28px; padding: 22px; border: 1px dashed var(--line); border-radius: 4px; text-align: center; }
 .empty-thread p { margin: 0 0 8px; }
@@ -365,8 +388,19 @@ body.rail-collapsed .menu-group:first-of-type { display: none; }
 
 /* ── 실행 화면(목록 n43 · 상세 n46 · 취소 결과 n50) ── */
 #runs-page, .page-sec { grid-area: page; overflow-y: auto; padding: 30px 44px 48px; min-width: 0; min-height: 0; }
-.work.mode-page, .work.mode-page.aux-open { grid-template-columns: var(--rail) minmax(0, 1fr); grid-template-rows: none; grid-template-areas: "menu page"; }
-.work.mode-page #sidebar, .work.mode-page #convo, .work.mode-page #aux { display: none !important; }
+/* 한 장짜리 화면(실행·감사·연결·멤버 권한·태그 방)도 사이드바(메뉴 + 대화 목록)를 남긴다(마스터 #1740 · 목록을 누르면 대화로) */
+.work.mode-page, .work.mode-page.aux-open { grid-template-columns: var(--nav-w) minmax(0, 1fr); grid-template-rows: none; grid-template-areas: "nav page"; }
+.work.mode-page #convo, .work.mode-page #aux { display: none !important; }
+/* 대화 화면이 아닐 때는 지난 대화를 «지금 화면»처럼 강조하지 않는다(태그 방의 태그 항목은 지금 화면이라 둔다) */
+.work.mode-page .conv-item.active:not(.tag-item) { border-color: transparent; }
+.work.mode-page .conv-item.active:not(.tag-item) .ttl { font-weight: 400; }
+/* 태그 방(마스터 #1700): 대화 목록은 채팅방(메인)·태그 절만 — 검색·스레드 목록은 숨김 */
+.work.mode-tag #search, .work.mode-tag .side-threads { display: none !important; }
+#tag-page { overflow-x: hidden; }
+/* 가장 아래로(마스터 #1700) — 대화·태그 방 스크롤 칸의 우하단에 뜬다. 자리는 app.js 가 칸 위치로 맞춘다 */
+.to-bottom { position: fixed; z-index: 20; width: 40px; height: 40px; border-radius: 50%; border: 1px solid var(--line); background: var(--bg); color: var(--fg); box-shadow: var(--shadow-lg); display: inline-flex; align-items: center; justify-content: center; padding: 0; cursor: pointer; }
+.to-bottom:hover { color: var(--accent); border-color: var(--accent); }
+.to-bottom[hidden] { display: none; }
 .page-head { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; margin: 4px 0 18px; }
 .page-head h2 { font-size: 38px; font-weight: 400; line-height: 1.1; }
 .back { font-size: 12.5px; color: var(--accent-700); text-decoration: none; }
@@ -513,39 +547,38 @@ body.rail-collapsed .menu-group:first-of-type { display: none; }
 #login-form button[type=submit] { height: 44px; width: 100%; font-size: 15px; }
 
 /* ───── 반응형: 1280 · 1000 · 760 ───── */
-/* 1000–1279: 메뉴는 기본 접힘(JS · 기억이 있으면 그것) · 패널은 덮는 서랍 */
+/* 1000–1279: 사이드바는 조금 좁게(펼친 채 시작 · 기억이 있으면 그것) · 보조 패널은 덮는 서랍 */
 @media (max-width: 1279px) {
-  :root { --aux-w: 300px; --side-w: 248px; }
+  :root { --aux-w: 300px; --nav-w: 264px; }
   /* 1279 아래: 보조 패널은 오른쪽에서 덮는 서랍(디자인 #782) — 덮는 동안 전송은 막는다(app.js auxOverlays) */
-  .work, .work.aux-open { grid-template-columns: var(--rail) var(--side-w) minmax(0, 1fr); grid-template-areas: "menu side convo"; }
+  .work, .work.aux-open { grid-template-columns: var(--nav-w) minmax(0, 1fr); grid-template-areas: "nav convo"; }
   #aux { position: fixed; top: var(--top-h); right: 0; bottom: 0; width: min(360px, 92vw); z-index: 30; box-shadow: var(--shadow-lg); background: var(--bg); }
   #runs-page, .page-sec { padding: 24px 28px 40px; }
 }
-/* 760–999: 메뉴는 아이콘 줄 고정(보조 패널 서랍은 위 1279 에서) */
+/* 761–999: 사이드바는 64px 아이콘 줄 · ☰ 를 누르면 메뉴 + 대화 목록이 한 서랍으로 펼쳐져 덮는다(마스터 #1740) */
+@media (min-width: 761px) and (max-width: 999px) {
+  :root { --nav-w: 64px; }
+  body:not(.show-sidebar) #menu { padding: 14px 12px; align-items: center; }
+  body:not(.show-sidebar) .menu-item { width: 40px; height: 40px; min-height: 40px; padding: 0; justify-content: center; }
+  body:not(.show-sidebar) .mi-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  body:not(.show-sidebar) .menu-group { font-size: 0; padding: 0; margin: 8px 6px; width: 28px; border-top: 1px solid var(--line); }
+  body:not(.show-sidebar) .menu-label + .menu-group { display: none; }
+  body:not(.show-sidebar) #sidebar { display: none !important; }
+  body:not(.show-sidebar) .menu-lang { padding: 6px 4px; }
+  body.show-sidebar #nav { position: fixed; top: var(--top-h); left: 0; bottom: 0; width: min(300px, 86vw); z-index: 30; box-shadow: var(--shadow-lg); }
+}
 @media (max-width: 999px) {
-  body, body.rail-collapsed { --rail: 64px; }
   #rail-btn { display: none; }
-  #menu { padding: 14px 12px; align-items: center; }
-  .menu-item { width: 40px; height: 40px; min-height: 40px; padding: 0; justify-content: center; }
-  .mi-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
-  .menu-group { font-size: 0; padding: 0; margin: 8px 6px; width: 28px; border-top: 1px solid var(--line); }
-  .menu-group:first-of-type { display: none; }
-  :root { --side-w: 240px; }
+  #menu-btn { display: inline-flex; }
   .dgrid { grid-template-columns: minmax(0, 1fr); }
-  /* 대화 목록은 ☰ 로 여닫는 서랍(디자인 #782 · 메뉴 아이콘 줄 오른쪽에서 나온다) */
-  #menu-btn, #side-close { display: inline-flex; }
-  .work, .work.aux-open { grid-template-columns: var(--rail) minmax(0, 1fr); grid-template-areas: "menu convo"; }
-  #sidebar { position: fixed; top: var(--top-h); left: var(--rail); bottom: 0; width: min(300px, 80vw); z-index: 30; background: var(--bg); box-shadow: var(--shadow-lg); transform: translateX(calc(-100% - var(--rail))); transition: transform .18s ease-out; }
-  body.show-sidebar #sidebar { transform: none; }
   .convo-head, .composer { padding-left: 20px; padding-right: 20px; }
   .banner, #context-box, .context-last { margin-left: 20px; margin-right: 20px; }
   #messages, #pending { padding-left: 20px; padding-right: 20px; }
 }
 /* 좁은 화면(PWA): 대화와 작성란이 기본. 메뉴(3열 격자)와 목록은 ☰ 서랍, 보조 패널은 작성란 위 아래쪽 시트 — 동시에 하나만 */
 @media (max-width: 760px) {
-  :root { --menu-h: 176px; }
   .work, .work.aux-open { grid-template-columns: minmax(0, 1fr); grid-template-areas: "convo"; }
-  .work.mode-page, .work.mode-page.aux-open { grid-template-columns: minmax(0, 1fr); grid-template-areas: "page"; }
+  .work.mode-page, .work.mode-page.aux-open, .work.mode-tag, .work.mode-tag.aux-open { grid-template-columns: minmax(0, 1fr); grid-template-areas: "page"; }
   #menu-btn { display: inline-flex; width: 44px; height: 44px; }
   .only-narrow { display: inline-flex; }
   .top { padding: 0 10px 0 6px; gap: 8px; }
@@ -554,17 +587,15 @@ body.rail-collapsed .menu-group:first-of-type { display: none; }
   .conn.off { padding: 0; border: none; }
   #me { display: none; }
   #logout-btn { font-size: 12px; padding: 2px 8px; }
-  /* 서랍 위쪽: 메뉴 3열 격자(44px 이상) · 아래쪽: 대화 목록 */
-  #menu { position: fixed; top: var(--top-h); left: 0; width: min(316px, 86vw); height: var(--menu-h); z-index: 31; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; align-content: start; padding: 14px; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); transform: translateX(-105%); transition: transform .18s ease-out; align-items: stretch; }
+  /* ☰ 서랍 하나(마스터 #1740): 위쪽은 메뉴 3열 격자(44px 이상) · 아래쪽은 대화 목록(목록만 스크롤) · 맨 아래 언어 */
+  #nav { position: fixed; top: var(--top-h); left: 0; bottom: 0; width: min(316px, 86vw); z-index: 30; transform: translateX(-105%); transition: transform .18s ease-out; }
+  body.show-sidebar #nav { transform: none; box-shadow: var(--shadow-lg); }
+  #menu { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; align-content: start; padding: 14px; align-items: stretch; }
   .menu-group, .menu-label { display: none !important; }
-  .menu-item, body.rail-collapsed .menu-item { width: auto; height: auto; min-height: 44px; padding: 4px 2px; justify-content: center; border: 1px solid var(--line); font-size: 12.5px; letter-spacing: -.01em; }
+  .menu-item { width: auto; height: auto; min-height: 44px; padding: 4px 2px; justify-content: center; border: 1px solid var(--line); font-size: 12.5px; letter-spacing: -.01em; }
   .menu-item svg { display: none; }
   .menu-item.active { border-color: var(--accent); background: transparent; }
-  .mi-label, body.rail-collapsed .mi-label { position: static; width: auto; height: auto; clip: auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  body.show-sidebar #menu { transform: none; }
-  #sidebar { position: fixed; top: calc(var(--top-h) + var(--menu-h)); left: 0; bottom: 0; width: min(316px, 86vw); z-index: 30; transform: translateX(-105%); transition: transform .18s ease-out; box-shadow: var(--shadow-lg); padding-top: 16px; }
-  body.show-sidebar #sidebar { transform: none; }
-  body.show-sidebar #menu { box-shadow: var(--shadow-lg); }
+  .mi-label { position: static; width: auto; height: auto; clip: auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .conv-item { padding: 10px 12px; min-height: 52px; }
   .convo-head { padding: 10px 16px 10px; }
   .title-row h2 { font-size: 23px; }
@@ -603,7 +634,7 @@ body.rail-collapsed .menu-group:first-of-type { display: none; }
   #login-pass, #login-form button[type=submit] { height: 48px; }
 }
 @media (prefers-reduced-motion: reduce) {
-  #sidebar, #menu { transition: none; }
+  #nav { transition: none; }
   .badge.st-running::before, .banner.warn::before, .runs li::after, .face-turn-dot { animation: none !important; }
 }
 
@@ -757,4 +788,46 @@ button.linkish { background: none; border: 0; padding: 0; cursor: pointer; text-
 /* 언어 선택(마스터 #823) — 메뉴 아래쪽 · 접힌 메뉴에선 글자는 숨고 선택 상자만 */
 .menu-lang { display: flex; align-items: center; gap: 8px; padding: 6px 12px; font-size: 0.85em; color: var(--muted, inherit); }
 .menu-lang select { flex: 1; min-width: 0; font: inherit; color: var(--fg); background: transparent; border: 1px solid var(--line, currentColor); border-radius: 4px; padding: 2px 4px; }
-body.rail-collapsed .menu-lang { padding: 6px 4px; }
+
+/* ── 태그 보기(마이그레이션 19 · 마스터 #1475) — 글의 태그 칩 · 사이드바 태그 목록 · 태그 페이지 ── */
+.msg .tags { display: flex; gap: 6px; flex-wrap: wrap; margin: 2px 0 4px; }
+.tag-chip { display: inline-flex; align-items: center; gap: 4px; font-size: 11.5px; line-height: 18px; padding: 0 7px; border-radius: 9px; border: 1px solid var(--accent); color: var(--accent); text-decoration: none; white-space: nowrap; }
+.tag-chip:hover { background: var(--hover); color: var(--accent); }
+.tag-chip.inline { border-style: dashed; color: var(--muted); border-color: var(--line); }
+.tag-chip.inline:hover { color: var(--muted); }
+.tag-chip.rank-ref { color: var(--muted); border-color: var(--line); } /* 참조 태그(셋째부터 · 마스터 #1674) — 실선이지만 옅게 */
+#tag-list .conv-item.archived .ttl { color: var(--muted); text-decoration: line-through; }
+#tag-list details summary { cursor: pointer; font-size: 12px; color: var(--faint); padding: 6px 12px; }
+.tg-msgs { display: flex; flex-direction: column; gap: 14px; max-width: 980px; }
+.tg-msgs .msg.inherited { opacity: 1; }
+.tg-admin { display: flex; gap: 12px; align-items: center; margin: -8px 0 14px; color: var(--muted); }
+.tg-compose { max-width: 980px; margin-top: 18px; border-top: 1px solid var(--line); padding-top: 12px; display: flex; flex-direction: column; gap: 8px; }
+.tg-compose textarea { width: 100%; resize: vertical; }
+.tg-reply { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.tg-compose-row { display: flex; gap: 10px; align-items: center; }
+#tag-default-row { display: flex; gap: 6px; align-items: center; padding: 6px 12px 0; }
+#tag-default-row select { flex: 1; min-width: 0; }
+
+/* 태그 궤도 거리(사양 6절 D10 · 마스터 #1510) — 최근에 부른 태그일수록 점이 크고 밝다 · 멀어질수록 작고 흐리다 */
+.tag-item .orbit-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
+.tag-item.orbit-1 .orbit-dot { width: 7px; height: 7px; opacity: 0.75; }
+.tag-item.orbit-2 .orbit-dot { width: 6px; height: 6px; opacity: 0.5; }
+.tag-item.orbit-3 .orbit-dot { width: 5px; height: 5px; opacity: 0.3; }
+.tag-item.orbit-4 .orbit-dot { width: 5px; height: 5px; background: transparent; border: 1px solid var(--faint); }
+/* # 태그 자동완성(마스터 #1523) — 글쓰기 칸 바로 위에 뜨는 목록 */
+.tag-suggest { position: fixed; z-index: 60; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18); padding: 4px; max-height: 260px; overflow: auto; font-size: 13px; }
+.tag-suggest .opt { display: flex; justify-content: space-between; gap: 10px; padding: 5px 8px; border-radius: 6px; cursor: pointer; }
+.tag-suggest .opt.sel { background: var(--hover); color: var(--accent); }
+.tag-suggest .opt.empty { cursor: default; }
+
+/* 태그 고르개(마스터 #1529) — 수신 대상 위 한 줄 · 넘치면 가로로 민다 */
+/* 두 줄까지 감싸고 넘치면 세로 스크롤(마스터 #1548 · 전엔 한 줄 가로 스크롤) */
+.tag-pick { flex-wrap: wrap; max-height: calc(2 * 26px + 6px); overflow-y: auto; margin-bottom: 6px; }
+.tag-pick .chip { min-height: 26px; padding: 0 10px; font-size: 12.5px; background: none; color: inherit; }
+.tag-pick .chip.on { border-color: var(--accent); color: var(--accent-700); background: color-mix(in srgb, var(--accent) 8%, transparent); }
+
+/* 글 번호 링크(마스터 #1537) — 누르면 그 글로 · 닿은 글은 잠깐 물든다 */
+.md a.seq-link { text-decoration: none; border-bottom: 1px dotted currentColor; }
+.msg.flash { animation: seq-flash 1.6s ease-out; }
+@keyframes seq-flash { from { background: color-mix(in srgb, var(--accent) 22%, transparent); } to { background: transparent; } }
+@media (prefers-reduced-motion: reduce) { .msg.flash { animation: none; outline: 2px solid var(--accent); } }

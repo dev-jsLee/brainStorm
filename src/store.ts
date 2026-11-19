@@ -65,6 +65,7 @@ import {
 import { DEFAULT_LANG, dictionaries, languages, normLang, protocolWords, t as tr } from './i18n.js';
 import type { FaceStore } from './modules/face/store.js';
 import type { MergeStore } from './modules/merge/store.js';
+import { TagStore } from './tagstore.js';
 import { parseHold, parseRequest, toHold, type RequestStore } from './modules/requests/store.js';
 import type { DelegationStore } from './modules/delegations/store.js';
 
@@ -138,6 +139,8 @@ export interface PostInput {
   call_budget?: unknown;
   /** 먼저 올린 업로드 id 들 — 이 메시지에 묶는다 */
   attachments?: unknown;
+  /** 태그 보기(마이그레이션 19): 보기에서 자동으로 붙는 주 태그(id 또는 이름 · ≤2) — 본문 첫 줄의 태그 줄과 합친다 */
+  tags?: unknown;
 }
 
 export interface UploadInfo {
@@ -449,12 +452,17 @@ function inertForwardHeads(body: string): string {
   return body;
 }
 
+/** 차선(마스터 #1563) — 글(seq = ?)의 첫 주 태그 id, 없으면 ''. 파서가 머리 순서대로 넣으므로 rowid 가 곧 순서 */
+const LANE_SQL = "SELECT COALESCE((SELECT tag_id FROM message_tags WHERE message_seq = ? AND role = 'primary' ORDER BY rowid LIMIT 1), '') AS lane";
+
 export class Store {
   readonly events = new EventEmitter();
   /** 대면 모듈(src/modules/face) — 켜졌을 때만 붙는다(docs/MODULES.md) */
   face: FaceStore | null = null;
   /** 합치기 모듈(src/modules/merge) */
   merge: MergeStore | null = null;
+  /** 태그 등록부(마이그레이션 19 · core) — 대표 에이전트·담당자·보관 */
+  readonly tags: TagStore = new TagStore(this);
   /** 요청 모듈(src/modules/requests) — 꺼지면 요청·보류가 없고 «요청→»은 그냥 글이다 */
   requests: RequestStore | null = null;
   /** 위임 대장 모듈(src/modules/delegations) */
@@ -501,6 +509,32 @@ export class Store {
     this.db.prepare("INSERT INTO meta(key, value) VALUES ('lang', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(l);
     if (before !== l) this.audit({ actor: this.actorOf(pr), action: 'settings.lang', result: 'ok', before: { lang: before }, after: { lang: l } });
     return { lang: l };
+  }
+
+  /** 에이전트별 모델(마스터 2026-11-04) — meta 'agent_model:<id>' · 없으면 null(어댑터 기본값) */
+  agentModel(agentId: string): string | null {
+    const r = this.db.prepare('SELECT value FROM meta WHERE key = ?').get(`agent_model:${agentId}`) as Row | undefined;
+    return (r?.value as string) ?? null;
+  }
+
+  /** 에이전트 모델 바꾸기(마스터만) — 빈 값·null 은 지움. 다음 claim 부터 어댑터에 실린다(도는 실행·세션은 안 건드림) */
+  setAgentModel(pr: Principal, agentId: string, value: unknown): { agent_id: string; model: string | null } {
+    this.requireMaster(pr, 'agents.model');
+    const p = this.getParticipant(agentId);
+    if (!p || p.kind !== 'agent') throw new ApiError(404, 'not_found', 'agent not found');
+    let m: string | null = null;
+    if (value !== null && value !== undefined && value !== '') {
+      if (typeof value !== 'string') throw new ApiError(400, 'bad_model', 'model must be a string or null');
+      m = value.trim();
+      if (!/^[A-Za-z0-9][A-Za-z0-9._:/@\[\]-]{0,99}$/.test(m)) throw new ApiError(400, 'bad_model', 'model: letters, digits and . _ : / @ [ ] - (≤100)', undefined, { key: 'err.bad_model' });
+    }
+    const before = this.agentModel(p.id);
+    const key = `agent_model:${p.id}`;
+    if (m) this.db.prepare('INSERT INTO meta(key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run(key, m);
+    else this.db.prepare('DELETE FROM meta WHERE key = ?').run(key);
+    if (before !== m)
+      this.audit({ actor: this.actorOf(pr), action: 'agents.model', result: 'ok', target_type: 'participant', target_id: p.id, before: { model: before }, after: { model: m } });
+    return { agent_id: p.id, model: m };
   }
 
   audit(e: AuditInput): { id: number; corr_id: string; grouped: boolean } {
@@ -920,6 +954,9 @@ export class Store {
         .prepare("SELECT SUM(state IN ('queued','running')) AS active, MAX(created_at) AS last_at FROM runs WHERE agent_id = ?")
         .get(a.id) as Row;
       const lastRun = this.db.prepare('SELECT state FROM runs WHERE agent_id = ? ORDER BY created_at DESC LIMIT 1').get(a.id) as Row | undefined;
+      const lastModel = this.db
+        .prepare('SELECT s.runtime, s.actual_model FROM runs r JOIN agent_sessions s ON s.id = r.session_id WHERE r.agent_id = ? AND s.actual_model IS NOT NULL ORDER BY r.created_at DESC LIMIT 1')
+        .get(a.id) as Row | undefined;
       const threads = (this.db.prepare('SELECT COUNT(*) AS n FROM thread_members WHERE participant_id = ? AND can_read = 1').get(a.id) as Row).n as number;
       return {
         ...a,
@@ -931,6 +968,8 @@ export class Store {
         threads,
         last_denied: denied ? { at: denied.last_at, reason: denied.reason, count: denied.repeat_count } : null,
         runs: { active: runs.active ?? 0, last_at: runs.last_at ?? null, last_state: (lastRun?.state as RunState) ?? null },
+        model: this.agentModel(a.id),
+        last_model: lastModel ? { runtime: (lastModel.runtime as string) ?? null, model: (lastModel.actual_model as string) ?? null } : null,
       };
     });
     return { agents, now: t };
@@ -1055,6 +1094,21 @@ export class Store {
   }
 
   /** readOnly = 조회만 하는 자리(스레드·메시지·맥락·실행·배달 목록). 거기서만 `read_all` 이 멤버 검사를 대신한다 */
+  /** 글 번호 → 그 글이 사는 대화(마스터 #1537 «#1533 을 누르면 그 대화로»). 읽을 수 있는 대화의 글만 · 없거나 못 읽으면 404 */
+  locateMessage(pr: Principal, seqIn: unknown): { seq: number; thread_id: string } {
+    const seq = Number(seqIn);
+    if (!Number.isInteger(seq) || seq < 1) throw new ApiError(400, 'bad_request', 'seq must be a positive integer');
+    const m = this.db.prepare('SELECT thread_id FROM messages WHERE seq = ?').get(seq) as Row | undefined;
+    if (!m) throw new ApiError(404, 'no_message');
+    try {
+      this.requireRead(pr, m.thread_id as string, 'message.locate', true);
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 404) throw new ApiError(404, 'no_message');
+      throw e;
+    }
+    return { seq, thread_id: m.thread_id as string };
+  }
+
   /** @internal 모듈(src/modules)도 부른다 */ requireRead(pr: Principal, threadId: string, action = 'thread.read', readOnly = false): Row {
     const t = this.db.prepare('SELECT * FROM threads WHERE id = ?').get(threadId) as Row | undefined;
     if (!t) throw new ApiError(404, 'no_thread');
@@ -1421,12 +1475,25 @@ export class Store {
   /** @internal */ withAttachments(msgs: Message[]): Message[] {
     const map = this.attachmentsFor(msgs.map((m) => m.seq));
     const mg = this.merge?.mergesFor(msgs.map((m) => m.seq));
-    return msgs.map((m) => ({ ...m, attachments: map.get(m.seq) ?? [], ...(mg?.has(m.seq) ? { merge: mg.get(m.seq) } : {}) }));
+    const tg = this.tags.tagsFor(msgs.map((m) => m.seq));
+    return msgs.map((m) => ({ ...m, attachments: map.get(m.seq) ?? [], tags: tg.get(m.seq) ?? { primary: [], inline: [] }, ...(mg?.has(m.seq) ? { merge: mg.get(m.seq) } : {}) }));
   }
 
-  listMessages(pr: Principal, threadId: string, after = 0, limit = 200): { messages: Message[]; next_cursor: number; has_more: boolean } {
+  /** 커서 뒤(after)로 오름차순. older 를 주면 거꾸로 — before 보다 작은 글 중 가장 최근 limit 개(before = null 이면 맨 끝부터 · 방을 열 때 최근 글만 · 마스터 #1732).
+   *  older 쪽의 has_more 는 «그보다 옛 글이 더 있나» · next_cursor 는 받은 글의 가장 큰 seq(없으면 after/0). 어느 쪽이든 글은 seq 오름차순이다. */
+  listMessages(pr: Principal, threadId: string, after = 0, limit = 200, older?: { before: number | null }): { messages: Message[]; next_cursor: number; has_more: boolean } {
     this.requireRead(pr, threadId, 'thread.read', true);
     const lim = Math.min(Math.max(1, limit), 500);
+    if (older) {
+      const rows = (
+        older.before == null
+          ? this.db.prepare('SELECT * FROM messages WHERE thread_id = ? ORDER BY seq DESC LIMIT ?').all(threadId, lim + 1)
+          : this.db.prepare('SELECT * FROM messages WHERE thread_id = ? AND seq < ? ORDER BY seq DESC LIMIT ?').all(threadId, older.before, lim + 1)
+      ) as Row[];
+      const has_more = rows.length > lim;
+      const msgs = this.withAttachments(rows.slice(0, lim).reverse().map(toMessage));
+      return { messages: msgs, next_cursor: msgs.length ? msgs[msgs.length - 1].seq : 0, has_more };
+    }
     const rows = this.db
       .prepare('SELECT * FROM messages WHERE thread_id = ? AND seq > ? ORDER BY seq LIMIT ?')
       .all(threadId, after, lim + 1) as Row[];
@@ -1538,6 +1605,9 @@ export class Store {
     if (budget !== null && recipients.length > budget) throw new ApiError(400, 'call_budget_exceeded');
 
     if (uploadIds.length) this.sweepUploads();
+    // 태그(사양 2.1): 보기의 주 태그 + 첫 줄 태그 줄 ≤2 · 본문 속은 인라인 · 넘치면 400 · 보관 태그는 거절 — 글을 남기기 전에 가른다
+    const tagSet0 = this.tags.resolve(body, 'head', input.tags);
+    const tagSet = replyTo !== null ? this.tags.inheritReply(tagSet0, replyTo) : tagSet0;
     const t = now();
     let faceRound: Row | undefined;
     let faceTo: string | null = null;
@@ -1568,6 +1638,7 @@ export class Store {
           .run(u.id, seq, u.kind, u.mime, u.name, u.path, u.size, u.sha256, t);
         this.db.prepare('DELETE FROM uploads WHERE id = ?').run(u.id);
       }
+      this.tags.attach(seq, tagSet);
       const ds: string[] = [];
       if (face && !thread.invoke_paused) {
         const f = fm!.faceMasterPost(threadId, seq, t);
@@ -1707,10 +1778,21 @@ export class Store {
 
   // ───────────────────────── 세션 ─────────────────────────
 
-  private activeSession(threadId: string, agentId: string): Row | undefined {
+  private activeSession(threadId: string, agentId: string, lane = ''): Row | undefined {
     return this.db
-      .prepare("SELECT * FROM agent_sessions WHERE thread_id = ? AND agent_id = ? AND status = 'active'")
-      .get(threadId, agentId) as Row | undefined;
+      .prepare("SELECT * FROM agent_sessions WHERE thread_id = ? AND agent_id = ? AND lane = ? AND status = 'active'")
+      .get(threadId, agentId, lane) as Row | undefined;
+  }
+
+  /** 차선(마스터 #1563): 글의 첫 주 태그 id — 없으면 '' (기본 차선). claim 의 SQL 식과 같은 규칙 */
+  private laneOf(seq: number): string {
+    const r = this.db.prepare(LANE_SQL).get(seq) as Row | undefined;
+    return (r?.lane as string) ?? '';
+  }
+
+  private nextGeneration(threadId: string, agentId: string): number {
+    const max = this.db.prepare('SELECT MAX(generation) AS g FROM agent_sessions WHERE thread_id = ? AND agent_id = ?').get(threadId, agentId) as Row;
+    return (max.g ?? 0) + 1;
   }
 
   /** 새 세대의 경계: 교체 시점 스레드의 마지막 seq (분기로 가져온 맥락 포함) */
@@ -1733,20 +1815,21 @@ export class Store {
     return base === null ? seen : Math.max(seen, base);
   }
 
-  private ensureSession(threadId: string, agentId: string): Row {
-    const s = this.activeSession(threadId, agentId);
+  private ensureSession(threadId: string, agentId: string, lane = ''): Row {
+    const s = this.activeSession(threadId, agentId, lane);
     if (s) return s;
     const id = newId('ses');
+    // 세대 번호는 차선과 상관없이 이 방 × 에이전트에서 MAX+1(UNIQUE 제약 · 어댑터 세션 키가 세대로 갈린다)
     this.db
       .prepare(
-        "INSERT INTO agent_sessions(id, thread_id, agent_id, generation, status, reason, created_at) VALUES (?,?,?,1,'active','first',?)",
+        "INSERT INTO agent_sessions(id, thread_id, agent_id, generation, status, reason, lane, created_at) VALUES (?,?,?,?,'active','first',?,?)",
       )
-      .run(id, threadId, agentId, now());
+      .run(id, threadId, agentId, this.nextGeneration(threadId, agentId), lane, now());
     return this.db.prepare('SELECT * FROM agent_sessions WHERE id = ?').get(id) as Row;
   }
 
   /** 세션 교체: 새 세대를 연다. 옛 세대의 진행 중 실행은 취소된다. */
-  rotateSession(pr: Principal, threadId: string, input: { agent_id?: unknown; reason?: unknown; carry?: unknown }): AgentSession {
+  rotateSession(pr: Principal, threadId: string, input: { agent_id?: unknown; reason?: unknown; carry?: unknown; lane?: unknown }): AgentSession {
     this.requireRead(pr, threadId, 'session.rotate');
     let agentId: string;
     if (pr.participant.kind === 'agent') {
@@ -1766,7 +1849,17 @@ export class Store {
       throw new ApiError(400, 'bad_agent');
     }
     const reason = typeof input.reason === 'string' ? input.reason.slice(0, 500) : 'manual';
-    return this.rotateCore(threadId, agentId, this.actorOf(pr), pr.participant.id, reason, input.carry === true);
+    // 차선(#1563): lane 을 주면 그 차선만, 안 주면 이 에이전트의 살아 있는 차선을 모두 교체한다(기본 차선 결과를 돌려줌)
+    const lanes =
+      typeof input.lane === 'string'
+        ? [input.lane]
+        : (this.db.prepare("SELECT lane FROM agent_sessions WHERE thread_id = ? AND agent_id = ? AND status = 'active' ORDER BY lane DESC").all(threadId, agentId) as Row[]).map(
+            (r) => r.lane as string,
+          );
+    if (!lanes.length) lanes.push('');
+    let out!: AgentSession;
+    for (const lane of lanes) out = this.rotateCore(threadId, agentId, this.actorOf(pr), pr.participant.id, reason, input.carry === true, undefined, lane);
+    return out;
   }
 
   /**
@@ -1844,16 +1937,15 @@ export class Store {
     return null;
   }
 
-  private rotateCore(threadId: string, agentId: string, actor: AuditActor, by: string, reason: string, carry: boolean, uptoSeq?: number): AgentSession {
+  private rotateCore(threadId: string, agentId: string, actor: AuditActor, by: string, reason: string, carry: boolean, uptoSeq?: number, lane = ''): AgentSession {
     const t = now();
     const changed: Row[] = [];
     const head = this.threadMaxSeq(threadId);
     const base = carry && head !== null ? this.carryBase(threadId, uptoSeq ?? head) : head;
     const id = this.db.transaction(() => {
-      const old = this.activeSession(threadId, agentId);
-      let gen = 1;
+      const old = this.activeSession(threadId, agentId, lane);
+      const gen = this.nextGeneration(threadId, agentId);
       if (old) {
-        gen = old.generation + 1;
         this.db.prepare("UPDATE agent_sessions SET status = 'retired', ended_at = ? WHERE id = ?").run(t, old.id);
         const active = this.db.prepare("SELECT * FROM runs WHERE session_id = ? AND state IN ('queued','running')").all(old.id) as Row[];
         for (const r of active) {
@@ -1868,16 +1960,13 @@ export class Store {
           this.auditCancelFinal(r, 'cancelled', 'rotated', t);
           changed.push(r);
         }
-      } else {
-        const max = this.db.prepare('SELECT MAX(generation) AS g FROM agent_sessions WHERE thread_id = ? AND agent_id = ?').get(threadId, agentId) as Row;
-        gen = (max.g ?? 0) + 1;
       }
       const nid = newId('ses');
       this.db
         .prepare(
-          "INSERT INTO agent_sessions(id, thread_id, agent_id, generation, prev_session_id, status, reason, last_delivered_seq, base_seq, carry, created_at) VALUES (?,?,?,?,?, 'active', ?, ?, ?, ?, ?)",
+          "INSERT INTO agent_sessions(id, thread_id, agent_id, generation, prev_session_id, status, reason, last_delivered_seq, base_seq, carry, lane, created_at) VALUES (?,?,?,?,?, 'active', ?, ?, ?, ?, ?, ?)",
         )
-        .run(nid, threadId, agentId, gen, old?.id ?? null, reason, old?.last_delivered_seq ?? null, base, carry ? 1 : 0, t);
+        .run(nid, threadId, agentId, gen, old?.id ?? null, reason, old?.last_delivered_seq ?? null, base, carry ? 1 : 0, lane, t);
       // 세션 교체(정책 9): 이전 세대와 새 세대, 닫힌 실행 수. 사유 문자열은 마스터·어댑터가 적은 교체 사유(본문 아님)
       this.audit({
         actor,
@@ -1999,7 +2088,8 @@ export class Store {
              WHERE d.recipient_id = ? AND d.status = 'pending' AND (d.retry_at IS NULL OR d.retry_at <= ?)
                AND t.invoke_paused = 0 AND t.deleted_at IS NULL
                AND NOT EXISTS (SELECT 1 FROM runs r WHERE r.thread_id = d.thread_id AND r.agent_id = d.recipient_id
-                               AND r.state IN ('queued','running') AND r.trigger_seq <> d.message_seq)
+                               AND r.state IN ('queued','running') AND r.trigger_seq <> d.message_seq
+                               AND r.lane = (${LANE_SQL.replace('?', 'd.message_seq')}))
              ORDER BY d.message_seq LIMIT 1`,
           )
           .get(me, t) as Row | undefined;
@@ -2018,13 +2108,14 @@ export class Store {
           )
           .run(sha256(leaseToken), leaseExp, t, d.id);
         // 자동 세션 교체(마스터 #283 A): 지금 세대가 기준을 넘었으면 이 실행부터 새 세대 — 최근 글 원문 + 이어받은 맥락으로 시작
+        const lane = this.laneOf(d.message_seq as number);
         {
-          const cur = this.activeSession(d.thread_id, me);
+          const cur = this.activeSession(d.thread_id, me, lane);
           const already = this.db.prepare('SELECT 1 FROM runs WHERE trigger_seq = ? AND agent_id = ?').get(d.message_seq, me);
           const due = cur && !already ? this.rotateDue(cur) : null;
-          if (due) this.rotateCore(d.thread_id, me, { id: 'server', kind: 'server' }, 'server', due, true, (d.message_seq as number) - 1); // 원인 앞의 최근 N개 + 원인
+          if (due) this.rotateCore(d.thread_id, me, { id: 'server', kind: 'server' }, 'server', due, true, (d.message_seq as number) - 1, lane); // 원인 앞의 최근 N개 + 원인
         }
-        const session = this.ensureSession(d.thread_id, me);
+        const session = this.ensureSession(d.thread_id, me, lane);
         // 같은 원인·수신자에 대한 실행은 한 번만 만든다 (세대가 바뀌어도 자동 재실행하지 않는다)
         const existing = this.db
           .prepare('SELECT * FROM runs WHERE trigger_seq = ? AND agent_id = ? ORDER BY generation DESC LIMIT 1')
@@ -2051,10 +2142,10 @@ export class Store {
           const rid = newId('run');
           this.db
             .prepare(
-              `INSERT INTO runs(id, thread_id, trigger_seq, delivery_id, agent_id, session_id, generation, input_snapshot, state, run_token_hash, lease_expires_at, created_at)
-               VALUES (?,?,?,?,?,?,?,?, 'queued', ?, ?, ?)`,
+              `INSERT INTO runs(id, thread_id, trigger_seq, delivery_id, agent_id, session_id, generation, input_snapshot, state, run_token_hash, lease_expires_at, lane, created_at)
+               VALUES (?,?,?,?,?,?,?,?, 'queued', ?, ?, ?, ?)`,
             )
-            .run(rid, d.thread_id, d.message_seq, d.id, me, session.id, session.generation, JSON.stringify(snapshot), sha256(runToken), t + this.cfg.runLeaseMs, t);
+            .run(rid, d.thread_id, d.message_seq, d.id, me, session.id, session.generation, JSON.stringify(snapshot), sha256(runToken), t + this.cfg.runLeaseMs, lane, t);
           this.db
             .prepare('UPDATE agent_sessions SET last_delivered_seq = MAX(COALESCE(last_delivered_seq, 0), ?) WHERE id = ?')
             .run(d.message_seq, session.id);
@@ -2137,6 +2228,8 @@ export class Store {
             : null,
           /** 규약·안내 언어(마스터 #823) — 어댑터가 프롬프트를 이 언어로 싣는다 */
           lang: this.lang(),
+          /** 마스터가 정한 이 에이전트의 모델(2026-11-04) — 없으면 null = 어댑터 기본값. 어댑터가 env 보다 먼저 쓴다 */
+          model: this.agentModel(me),
         };
       }
       return null;
@@ -2376,6 +2469,8 @@ export class Store {
           JSON.stringify(ho.handoff_to), pl.pull ? JSON.stringify(pl.pull) : null, t,
         );
       const seq = Number(info.lastInsertRowid);
+      // 태그(사양 2.1): 끝줄 태그 줄이 있으면 그것 · 없으면 받은 글의 주 태그를 물려받는다 · 넘쳐도 답은 버리지 않고 앞 둘만
+      this.tags.attach(seq, this.tags.resolve(finalBody, 'tail', undefined, this.tags.primaryOf(r.trigger_seq), false));
       // 에이전트 답은 전달(delivery)을 만들지 않는다 — 에이전트 간 자동 호출 없음. 예외는 허용 짝의 요청 하나(마스터 #352)
       if (asRequest) {
         const did = newId('dlv');

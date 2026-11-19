@@ -98,6 +98,11 @@ function renderFace() {
   const reviewer = r?.reviewer ?? f?.config?.reviewer;
   // 이 라운드의 글만(라운드가 없으면 전부) — 지시 글부터
   const from = r ? r.instruction_seq : 0;
+  // 대화는 최근 글만 열린다(마스터 #1732) — 이 라운드의 지시 글이 그보다 옛 글이면 거기까지 받은 뒤 다시 그린다
+  if (S.hasOlder && S.messages.length && S.messages[0].seq > from && !S.olderLoading) {
+    const th = S.cur;
+    (from ? ensureSeq(from) : (async () => { while (th === S.cur && S.hasOlder && (await loadOlder(500))); })()).then(() => th === S.cur && renderFace()).catch(() => {});
+  }
   const msgs = S.messages.filter((m) => m.seq >= from);
   $('face-left-h').textContent = drafter ? pname(drafter) : t('face.drafter_side');
   $('face-right-h').textContent = reviewer ? pname(reviewer) : t('face.reviewer_side');

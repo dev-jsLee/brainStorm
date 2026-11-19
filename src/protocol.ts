@@ -166,6 +166,10 @@ export interface AgentConnection extends AgentStatus {
   /** 서버가 아는 마지막 연결 실패(감사 기록의 auth.token 거부) — 어댑터 쪽 실패(LLM 서버 꺼짐 등)는 서버가 모른다 */
   last_denied: { at: number; reason: string; count: number } | null;
   runs: { active: number; last_at: number | null; last_state: RunState | null };
+  /** 마스터가 정한 모델(2026-11-04) — null 이면 어댑터 기본값 */
+  model: string | null;
+  /** 최근 실행이 실제로 쓴 런타임·모델(어댑터 보고) */
+  last_model: { runtime: string | null; model: string | null } | null;
 }
 
 export interface Message {
@@ -196,6 +200,17 @@ export interface Message {
   run_outcome?: 'cancelled' | 'failed' | 'unknown';
   /** 하위 스레드 합침 묶음 글이면(마이그레이션 17 · 마스터 #706): 어디서 무엇을 옮겼나. claim 맥락에서는 본문이 옮긴 글 전문으로 펼쳐진다 */
   merge?: MergeInfo | null;
+  /** 태그 보기(마이그레이션 19): 주 태그(≤2)·인라인 — 등록된 것만 · 없으면 둘 다 빈 배열 */
+  tags?: MessageTags;
+}
+
+export interface TagRef {
+  id: string;
+  name: string;
+}
+export interface MessageTags {
+  primary: TagRef[];
+  inline: TagRef[];
 }
 
 /** 합침 묶음: 하위 스레드의 제 글 중 from_seq..to_seq(count 개)를 이 글 하나로 상위 대화에 옮겼다 */
@@ -310,6 +325,7 @@ export interface AgentSession {
 export type WsNotice =
   | { t: 'hello'; participant: string; server_seq: number }
   | { t: 'msg'; thread_id: string; seq: number }
+  | { t: 'tag'; tag_id: string }
   | { t: 'run'; thread_id: string; run_id: string; state: RunState }
   | { t: 'thread'; thread_id: string }
   | { t: 'delivery'; thread_id: string }

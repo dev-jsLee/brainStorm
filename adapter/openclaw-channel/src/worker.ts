@@ -34,6 +34,8 @@ export interface TurnRequest {
   texts?: string[];
   /** 규약·안내 언어(claim.lang · 마스터 #823) — 실행기가 덧붙이는 안내도 이 언어로 */
   lang?: string;
+  /** 마스터가 brainStorm 에서 정한 모델(claim.model · 2026-11-04) — 있으면 실행기 설정(env)보다 먼저. 없으면 실행기 기본값 */
+  model?: string;
 }
 
 export type TurnAttachment = AttachmentInfo & { seq: number };
@@ -98,6 +100,8 @@ interface Claim {
   face?: ClaimFace | null;
   /** 규약·안내 언어(마스터 #823) — 옛 서버는 안 보낸다(ko) */
   lang?: string;
+  /** 에이전트별 모델(2026-11-04) — null·없음 = 어댑터 기본값 · 옛 서버는 안 보낸다 */
+  model?: string | null;
 }
 
 export class HttpError extends Error {
@@ -353,6 +357,7 @@ export class BrainstormWorker {
           attachments: newMessages.flatMap((m) => (m.attachments ?? []).map((a) => ({ ...a, seq: m.seq }))),
           fetchAttachment: (id, signal) => this.client.download(id, signal),
           lang: claim.lang,
+          model: claim.model ?? undefined,
           onProgress: (note) => {
             const n = note.replace(/\s+/g, ' ').trim().slice(0, 300);
             if (n) progress = n;

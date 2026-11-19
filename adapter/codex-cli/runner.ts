@@ -138,14 +138,14 @@ export function makeCodexRunner(o: CodexRunnerOptions): RunTurn {
       save();
     }
     const { threadId: _t, ...rest } = r;
-    return { ...rest, meta: { ...rest.meta, model: o.model }, extra: { resumed: !!threadId } };
+    return { ...rest, meta: { ...rest.meta, model: req.model || o.model }, extra: { resumed: !!threadId } };
   };
 }
 
 function runOnce(o: CodexRunnerOptions, req: TurnRequest, threadId: string | null): Promise<TurnResult & { threadId: string | null }> {
   return new Promise((resolve, reject) => {
     const started = Date.now();
-    const child = spawn(o.bin, buildArgs(o, threadId), {
+    const child = spawn(o.bin, buildArgs({ ...o, model: req.model || o.model }, threadId), {
       cwd: o.cwd,
       env: o.env ?? process.env,
       stdio: ['pipe', 'pipe', 'pipe'],

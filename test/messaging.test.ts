@@ -58,6 +58,42 @@ describe('메시지', () => {
     c2.ws.close();
   });
 
+  test('최근 글만(tail) · 그보다 옛 글(before) — 방을 열 때 끝부터 받고 위로 굴리면 이어 받는다(마스터 #1732)', async () => {
+    const th = await newThread(ctx, '긴 대화', null);
+    const other = await newThread(ctx, '곁 대화', null);
+    const seqs: number[] = [];
+    for (let i = 1; i <= 7; i++) {
+      seqs.push((await post(ctx, th, `t${i}`)).message.seq);
+      if (i === 3) await post(ctx, other, '남의 글'); // 다른 대화 글이 사이에 끼어도 안 섞인다
+    }
+    const tail = await ctx.master('GET', `/api/threads/${th}/messages?tail=1&limit=3`);
+    assert.equal(tail.status, 200);
+    assert.deepEqual(tail.json.messages.map((m: any) => m.body), ['t5', 't6', 't7']); // 오름차순
+    assert.equal(tail.json.has_more, true); // 더 옛 글이 있다
+    assert.equal(tail.json.next_cursor, seqs[6]); // 이어서 after= 로 새 글을 받는 커서
+    const b1 = await ctx.master('GET', `/api/threads/${th}/messages?before=${tail.json.messages[0].seq}&limit=3`);
+    assert.deepEqual(b1.json.messages.map((m: any) => m.body), ['t2', 't3', 't4']);
+    assert.equal(b1.json.has_more, true);
+    const b2 = await ctx.master('GET', `/api/threads/${th}/messages?before=${b1.json.messages[0].seq}&limit=3`);
+    assert.deepEqual(b2.json.messages.map((m: any) => m.body), ['t1']);
+    assert.equal(b2.json.has_more, false);
+    const b3 = await ctx.master('GET', `/api/threads/${th}/messages?before=${seqs[0]}&limit=3`);
+    assert.deepEqual(b3.json.messages, []);
+    assert.equal(b3.json.has_more, false);
+    // 전부 들어가면 has_more 없음
+    const all = await ctx.master('GET', `/api/threads/${th}/messages?tail=1&limit=500`);
+    assert.equal(all.json.messages.length, 7);
+    assert.equal(all.json.has_more, false);
+    // 빈 대화 · 잘못된 before
+    const empty = await newThread(ctx, '빈 대화', null);
+    const e = await ctx.master('GET', `/api/threads/${empty}/messages?tail=1&limit=5`);
+    assert.deepEqual(e.json, { messages: [], next_cursor: 0, has_more: false });
+    for (const bad of ['0', '-3', 'x', '1.5']) assert.equal((await ctx.master('GET', `/api/threads/${th}/messages?before=${bad}`)).status, 400, bad);
+    // 멤버 아닌 에이전트는 tail·before 로도 못 읽는다
+    assert.equal((await ctx.agent('alpha', 'GET', `/api/threads/${th}/messages?tail=1`)).status, 404);
+    assert.equal((await ctx.agent('alpha', 'GET', `/api/threads/${th}/messages?before=${seqs[6]}`)).status, 404);
+  });
+
   test('분기 스레드는 분기 시점 뒤의 부모 메시지를 물려받지 않는다', async () => {
     const th = await newThread(ctx, '부모', 'beta');
     const s1 = (await post(ctx, th, 'p1', { recipients: [] })).message.seq;

@@ -163,6 +163,20 @@ let p = ''; process.stdin.on('data', (d) => (p += d)); process.stdin.on('end', (
     assert.equal(u2.cost_total_usd, 0.1235);
   });
 
+  test('에이전트별 모델(2026-11-04): 마스터가 정하면 claim.model → --model 이 붙음 · 비우면 다시 없음', async () => {
+    const w = worker();
+    const th = await newThread(ctx, 'CC 모델', 'alpha');
+    assert.equal((await ctx.master('PUT', '/api/agents/alpha/model', { model: 'opus' })).json.model, 'opus');
+    await post(ctx, th, '모델 시험 하나');
+    assert.equal(await w.handleOne(), 'succeeded');
+    const c1 = calls().at(-1);
+    assert.equal(c1.args[c1.args.indexOf('--model') + 1], 'opus');
+    assert.equal((await ctx.master('PUT', '/api/agents/alpha/model', { model: null })).json.model, null);
+    await post(ctx, th, '모델 시험 둘');
+    assert.equal(await w.handleOne(), 'succeeded');
+    assert.ok(!calls().at(-1).args.includes('--model'));
+  });
+
   test('명시적 참조: 글의 태그 → 원자 노트 본문이 프롬프트에 · 같은 세션 두 번째는 «이미 실었음» · usage 에 기록', async () => {
     const rd = path.join(dir, 'vault', '원자');
     fs.mkdirSync(rd, { recursive: true });

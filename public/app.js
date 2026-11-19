@@ -11,11 +11,17 @@ const S = {
   participants: new Map(),
   agents: new Map(), // id → 연결 상태(/api/agents)
   threads: [],
+  tags: [], // 태그 등록부(보관 포함 · /api/tags?archived=1 · 마이그레이션 19)
+  defaultAgent: null, // 대표 에이전트(meta default_agent)
+  tagCur: null, // 태그 보기 페이지의 태그 id
   roomDetail: null,
   cur: null, // 현재 대화 id
   detail: null, // {thread, members, sessions}
-  messages: [], // 현재 대화 메시지 (seq 오름차순)
+  messages: [], // 현재 대화 메시지 (seq 오름차순) — 방을 열 때는 최근 PAGE 개만, 위로 굴리면 옛 글을 앞에 붙인다(마스터 #1732)
   seen: new Set(), // 이미 표시한 seq
+  hasOlder: false, // 화면에 안 불러온 옛 글이 서버에 더 있나
+  olderLoading: null, // 옛 글 받는 중(Promise)
+  opened: null, // 첫 읽기(최근 글)가 끝난 대화 id — 링크 이동·자리 되살림이 이걸 기다린다
   context: [], // 분기 때 가져온 메시지
   cursor: 0,
   runs: [],
@@ -71,6 +77,8 @@ function mdInline(t) {
     const u = url.slice(0, url.length - tail.length);
     return pre + hold(`<a href="${u}" target="_blank" rel="noopener noreferrer">${u}</a>`) + tail;
   });
+  // 글 번호 «#1533» → 그 글로 가는 링크(마스터 #1537). 낱말 속·URL 조각·`&#39;` 같은 이스케이프는 안 건드린다
+  t = t.replace(/(^|[^\p{L}\p{N}_/&#])#(\d{1,9})(?![\p{L}\p{N}_])/gu, (_, pre, n) => pre + hold(`<a class="seq-link" href="#m${n}" data-seq="${n}">#${n}</a>`));
   t = t
     .replace(/\*\*(?=\S)([^\n]*?\S)\*\*/g, '<strong>$1</strong>')
     .replace(/__(?=\S)([^\n]*?\S)__/g, '<strong>$1</strong>')
@@ -209,8 +217,16 @@ function store(key, val) {
   } catch {}
   return null;
 }
-const fmtTime = (ts) => (ts ? new Date(ts).toLocaleString(I18N.locale, { hour12: false }) : '');
-const fmtHm = (ts) => (ts ? new Date(ts).toLocaleTimeString(I18N.locale, { hour12: false, hour: '2-digit', minute: '2-digit' }) : '');
+// 날짜 꼴은 만들어 둔 Intl 하나로(마스터 #1732: toLocaleString 은 부를 때마다 꼴을 새로 만들어 글이 많으면 방 열기의 큰 몫이었다) — 꼴은 toLocaleString 기본과 같다
+const fmtCache = new Map();
+const fmtWith = (kind, opts) => {
+  const k = `${kind}|${I18N.locale}`;
+  let f = fmtCache.get(k);
+  if (!f) fmtCache.set(k, (f = new Intl.DateTimeFormat(I18N.locale, opts)));
+  return f;
+};
+const fmtTime = (ts) => (ts ? fmtWith('full', { year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric', second: 'numeric', hour12: false }).format(new Date(ts)) : '');
+const fmtHm = (ts) => (ts ? fmtWith('hm', { hour12: false, hour: '2-digit', minute: '2-digit' }).format(new Date(ts)) : '');
 function rel(ts) {
   if (!ts) return '';
   const d = Date.now() - ts;
@@ -412,8 +428,8 @@ $('backdrop').addEventListener('click', () => setDrawer(false));
 for (const b of document.querySelectorAll('.menu-item')) {
   b.addEventListener('click', () => {
     const m = b.dataset.menu;
-    // 좁은 화면에서 메뉴는 서랍 안에 있다(디자인 #782) — 고르면 서랍을 닫는다
-    if (isNarrow() && document.body.classList.contains('show-sidebar')) setDrawer(false);
+    // ≤999 에서 펼친 메뉴는 서랍 안에 있다(디자인 #782 · #1740) — 고르면 서랍을 닫는다
+    if (listDrawer() && document.body.classList.contains('show-sidebar')) setDrawer(false);
     if (m === 'logout') return $('logout-btn').click();
     if (m === 'runs' || m === 'audit' || m === 'agents') {
       location.hash = m;
@@ -430,7 +446,7 @@ for (const b of document.querySelectorAll('.menu-item')) {
     } else setAux(true, m);
   });
 }
-// ───── 메뉴 접기(디자인 #782): 넓은 화면에서 메뉴를 아이콘 줄(64px)로 · 이 브라우저에 기억 · 기억이 없으면 1280px 아래에서 접힘 ─────
+// ───── 사이드바 접기(디자인 #782 · #1740): ≥1000 에서 사이드바(메뉴 + 대화 목록)를 아이콘 줄(64px)로 — 대화 목록은 숨는다 · 이 브라우저에 기억 · 기억이 없으면 펼친 채 ─────
 function setRail(collapsed, remember) {
   document.body.classList.toggle('rail-collapsed', collapsed);
   const b = $('rail-btn');
@@ -439,11 +455,13 @@ function setRail(collapsed, remember) {
   b.setAttribute('aria-label', label);
   b.title = label;
   if (remember) store('bs.rail', collapsed ? 'collapsed' : 'open');
+  if (remember) syncToBottom(); // 대화 칸 폭이 바뀐다 — «가장 아래로» 자리를 다시 잰다(시작 때는 아직 그릴 것이 없다)
 }
 $('rail-btn').addEventListener('click', () => setRail(!document.body.classList.contains('rail-collapsed'), true));
 {
   const saved = store('bs.rail');
-  setRail(saved ? saved === 'collapsed' : typeof matchMedia === 'function' && matchMedia('(max-width: 1279px)').matches, false);
+  // 한 사이드바(#1740)는 옛 메뉴 + 목록(64+248)보다 좁다 — 1000–1279 도 펼친 채 시작(접으면 대화 목록이 숨으므로)
+  setRail(saved === 'collapsed', false);
 }
 function syncMenu() {
   // 실행 화면이면 «실행 상태». 대화 작업 중에는 보조 패널의 세션·참여자 탭을 따른다(실행 탭은 대화 작업의 일부)
@@ -690,7 +708,14 @@ function focusList() {
 }
 
 // ───── 대화 열기 ─────
-window.addEventListener('hashchange', () => route());
+/** 마지막으로 화면에 올린 주소의 # — popstate 가 주소를 바꾸는 뒤로가기인지(→ hashchange 가 뒤따른다) 같은 주소 안인지 가른다 */
+let lastHash = location.hash;
+window.addEventListener('hashchange', () => {
+  const st = popPending;
+  popPending = null;
+  const done = route();
+  if (st) Promise.resolve(done).then(() => restorePos(st), () => {});
+});
 
 /** 주소 → 화면. 대화(#th_…) · 실행 목록(#runs?…) · 실행 상세(#run/<id>) · 취소 결과(#run/<id>/cancel) */
 function parseHash() {
@@ -699,24 +724,32 @@ function parseHash() {
   for (const pg of ['audit', 'agents', 'members']) if (h === pg || h.startsWith(`${pg}?`)) return { page: pg, q: new URLSearchParams(h.slice(pg.length + 1)) };
   const m = /^run\/([^/?]+)(\/cancel)?$/.exec(h);
   if (m) return { page: m[2] ? 'cancel' : 'run', id: decodeURIComponent(m[1]) };
+  const tg = /^tag\/([^/?]+)$/.exec(h);
+  if (tg) return { page: 'tag', id: decodeURIComponent(tg[1]) };
   return { page: 'convo', id: h };
 }
 /** 화면 전환: 'convo' 는 대화 목록·대화·보조 패널, 그 밖은 한 장짜리 화면(실행·감사·연결·멤버 권한)이 그 자리를 쓴다 */
 function setMode(mode) {
   S.mode = mode;
+  if (mode !== 'tag') S.tagShown = null;
   const page = mode !== 'convo';
   for (const x of [$('app-view'), document.body]) {
     x.classList.toggle('mode-page', page);
     x.classList.toggle('mode-runs', mode === 'runs');
+    x.classList.toggle('mode-tag', mode === 'tag'); // 태그 방은 사이드바(채팅방·태그 절)를 남긴다(마스터 #1700)
   }
   $('runs-page').hidden = mode !== 'runs';
   $('audit-page').hidden = mode !== 'audit';
   $('agents-page').hidden = mode !== 'agents';
   $('members-page').hidden = mode !== 'members';
+  $('tag-page').hidden = mode !== 'tag';
+  if (mode !== 'tag') S.tagCur = null;
   if (page) setDrawer(false);
   syncMenu();
+  syncToBottom();
 }
 async function route() {
+  lastHash = location.hash;
   const r = parseHash();
   if (r.page === 'convo') {
     const was = S.mode;
@@ -727,6 +760,10 @@ async function route() {
       return;
     }
     return openThread(r.id);
+  }
+  if (r.page === 'tag') {
+    setMode('tag');
+    return showTag(r.id);
   }
   if (r.page === 'audit' || r.page === 'agents' || r.page === 'members') {
     setMode(r.page);
@@ -752,6 +789,7 @@ async function openThread(id) {
       return;
     }
     history.replaceState(null, '', `#${id}`);
+    lastHash = location.hash;
   }
   setDrawer(false);
   S.cur = id;
@@ -760,6 +798,10 @@ async function openThread(id) {
   S.messages = [];
   S.seen = new Set();
   S.cursor = 0;
+  S.hasOlder = false;
+  S.olderLoading = null;
+  S.opened = null;
+  runLineSig = new WeakMap();
   S.runs = [];
   S.deliveries = [];
   S.detail = null;
@@ -773,6 +815,7 @@ async function openThread(id) {
   renderList();
   try {
     await Promise.all([loadDetail(), loadContext(), fetchNew(), loadRuns()]);
+    if (S.detail && !faceActive()) renderRecipients(); // 글을 다 읽은 뒤 «직전 대화 상대»를 다시 고른다(상세가 글보다 먼저 올 수 있다)
     syncEmpty();
     const th = S.detail.thread;
     announce(t('app.thread_opened', { kind: kindLabel(th), title: th.title, path: pathOf(th) }));
@@ -897,9 +940,14 @@ function renderRecipients() {
   if (faceActive()) return $('recipients').replaceChildren(...faceRecipientsNote());
   const agents = d.members.filter((m) => m.kind === 'agent' && m.can_read);
   const box = $('recipients');
-  // 참여자가 마스터와 에이전트 하나뿐이면 그 에이전트가 기본 수신 대상(대화에 정해 둔 기본 수신자가 있으면 그것이 먼저)
+  // 기본 수신 대상(마스터 #1535 «직전에 대화한 상대» · «수신 대상은 항상 켜 둔다»): 이 화면에서 칩을 만졌으면 그것 →
+  // 이 대화에서 내가 마지막으로 누군가에게 보낸 글의 수신자(메모 글은 건너뜀) → 마지막으로 말한 에이전트 →
+  // 대화에 정해 둔 기본 수신자 → 에이전트가 하나뿐이면 그 에이전트 → 백구
+  const ids = new Set(agents.map((a) => a.participant_id));
   const sole = d.members.filter((m) => m.kind === 'agent').length === 1 && agents.length === 1 ? agents[0].participant_id : null;
-  const def = d.thread.default_recipient ?? sole;
+  const kept = S.rcptPick?.thread === d.thread.id ? S.rcptPick : null;
+  const fallback = [d.thread.default_recipient, sole, 'baekgu'].find((x) => x && ids.has(x));
+  const pickSet = new Set(kept ? kept.to : lastPartners(ids) ?? (fallback ? [fallback] : []));
   const chip = (value, label, checked, { key, ...extra } = {}) => {
     const input = el('input', { type: 'checkbox', value, checked, ...extra });
     const c = el('label', { class: `chip${checked ? ' on' : ''}`, title: key ? t('app.shortcut', { key }) : null }, input, label);
@@ -911,9 +959,9 @@ function renderRecipients() {
     ...(agents.length
       ? [
           // «메모» = 명시적으로 아무에게도 안 보냄(마스터 #271) — 에이전트를 고르면 꺼지고, 메모를 켜면 에이전트가 다 꺼진다
-          chip('*memo', t('app.memo'), false, { 'data-memo': '1', title: t('app.memo_title') }),
-          chip('*all', t('app.all'), agents.length > 0 && agents.every((a) => a.participant_id === def), { 'data-all': '1', title: t('app.all_title'), key: 'Alt+0' }),
-          ...agents.map((a, i) => chip(a.participant_id, a.name, a.participant_id === def, { 'data-agent': '1', ...(i < 9 ? { key: `Alt+${i + 1}` } : {}), ...(S.onCallOnly?.has(a.participant_id) ? { 'data-oncall': '1' } : {}) })),
+          chip('*memo', t('app.memo'), !!kept?.memo, { 'data-memo': '1', title: t('app.memo_title') }),
+          chip('*all', t('app.all'), !kept?.memo && agents.filter((a) => !S.onCallOnly?.has(a.participant_id)).length > 0 && agents.filter((a) => !S.onCallOnly?.has(a.participant_id)).every((a) => pickSet.has(a.participant_id)), { 'data-all': '1', title: t('app.all_title'), key: 'Alt+0' }),
+          ...agents.map((a, i) => chip(a.participant_id, a.name, !kept?.memo && pickSet.has(a.participant_id), { 'data-agent': '1', ...(i < 9 ? { key: `Alt+${i + 1}` } : {}), ...(S.onCallOnly?.has(a.participant_id) ? { 'data-oncall': '1' } : {}) })),
         ]
       : [el('span', { class: 'small faint' }, t('app.no_member_agents_saved'))]),
     el('span', { class: 'small faint', id: 'rcpt-note' }),
@@ -922,6 +970,18 @@ function renderRecipients() {
   syncChips();
 }
 // 주소로 고른 수신 대상(?to=)은 사람이 칩을 만지거나 보낼 때까지 남는다 — 채운 뒤 실시간 연결이 붙으며 칩을 다시 그려도 지워지지 않게(마스터 #323)
+/** 이 대화의 «직전 대화 상대» — 내가 마지막으로 보낸 글(수신자 있는 것)의 수신자, 없으면 마지막으로 말한 에이전트. 고를 수 있는 칩만 · 없으면 null */
+function lastPartners(ids) {
+  const ms = S.messages ?? [];
+  for (let i = ms.length - 1; i >= 0; i--) {
+    const m = ms[i];
+    if (!S.me || m.author_id !== S.me.id || !m.recipients?.length) continue;
+    const to = m.recipients.filter((x) => ids.has(x));
+    if (to.length) return to;
+  }
+  for (let i = ms.length - 1; i >= 0; i--) if (ids.has(ms[i].author_id)) return [ms[i].author_id];
+  return null;
+}
 function applyPrefillTo() {
   const p = S.prefillTo;
   if (!p || p.thread !== S.cur) return;
@@ -934,6 +994,10 @@ function applyPrefillTo() {
   if (memo) memo.checked = false;
 }
 function onChip(input) {
+  chipToggle(input);
+  S.rcptPick = { thread: S.cur, to: selectedRecipients(), memo: memoChosen() }; // 사람이 고른 것 — 다시 그려도 지킨다
+}
+function chipToggle(input) {
   S.prefillTo = null;
   const all = $('recipients').querySelector('input[data-all]');
   const memo = $('recipients').querySelector('input[data-memo]');
@@ -1102,6 +1166,100 @@ function syncEmpty() {
   const empty = S.messages.length === 0 && !!S.detail;
   $('empty-thread').hidden = !empty;
 }
+// ───── 옛 글 이어 받기(마스터 #1732 «대화기록이 너무 많이 쌓여서 느려짐»): 방을 열면 최근 PAGE 개만 그리고, 위로 굴려 꼭대기 근처에 오면 그 앞 PAGE 개를 붙인다 ─────
+const PAGE = 100;
+const OLDER_GAP = 600; // 꼭대기에서 이만큼(px) 안이면 미리 받는다
+/** 목록 맨 위 «이전 글 더 보기» 줄 — 옛 글이 서버에 더 있을 때만 */
+function syncOlder() {
+  const box = $('messages');
+  let bar = $('older-bar');
+  if (!S.hasOlder) {
+    bar?.remove();
+    return;
+  }
+  if (!bar) {
+    bar = el('div', { id: 'older-bar', class: 'older-bar' }, el('button', { type: 'button', class: 'link', onclick: () => loadOlder().catch(() => {}) }, t('app.load_older')));
+  }
+  if (box.firstChild !== bar) box.prepend(bar);
+  bar.classList.toggle('busy', !!S.olderLoading);
+  bar.firstChild.disabled = !!S.olderLoading;
+  bar.firstChild.textContent = S.olderLoading ? t('app.loading_older') : t('app.load_older');
+}
+/** 지금 화면 맨 위 글 — 앞에 글을 붙인 뒤 같은 글을 같은 자리에 두려고(브라우저의 스크롤 고정에 기대지 않는다) */
+function topAnchor() {
+  const sc = $('messages');
+  const top = sc.getBoundingClientRect().top;
+  for (const e of sc.children) {
+    if (!e.classList.contains('msg')) continue;
+    const b = e.getBoundingClientRect();
+    if (b.bottom > top + 1) return { e, off: b.top - top };
+  }
+  return null;
+}
+/** before = 지금 가장 옛 글 · limit 개를 더 받아 앞에 붙인다 · 받은 수 */
+function loadOlder(limit = PAGE) {
+  if (S.olderLoading) return S.olderLoading;
+  if (!S.hasOlder || !S.messages.length) return Promise.resolve(0);
+  const th = S.cur;
+  const before = S.messages[0].seq;
+  S.olderLoading = (async () => {
+    const r = await api('GET', `/api/threads/${th}/messages?before=${before}&limit=${Math.min(500, Math.max(1, limit))}`);
+    if (th !== S.cur || S.messages[0]?.seq !== before) return 0; // 그새 대화가 바뀌었거나 다시 읽혔다
+    const fresh = r.messages.filter((m) => !S.seen.has(m.seq));
+    const anchor = topAnchor();
+    const sc = $('messages');
+    const nodes = fresh.map((m) => (S.seen.add(m.seq), msgEl(m, false)));
+    S.messages = [...fresh, ...S.messages];
+    S.hasOlder = r.has_more;
+    const bar = $('older-bar');
+    if (bar) bar.after(...nodes);
+    else sc.prepend(...nodes);
+    renderRunLines();
+    if (anchor) sc.scrollTop += anchor.e.getBoundingClientRect().top - sc.getBoundingClientRect().top - anchor.off;
+    return fresh.length;
+  })().finally(() => {
+    if (th === S.cur) {
+      S.olderLoading = null;
+      syncOlder();
+    }
+  });
+  syncOlder();
+  return S.olderLoading;
+}
+/** seq 글이 이 대화에 있으면 그 글까지 옛 글을 받는다(링크 이동·자리 되살림 · 마스터 #1732) — 첫 읽기를 기다린 뒤 */
+async function ensureSeq(seq) {
+  const th = S.cur;
+  const end = Date.now() + 6000;
+  while (S.opened !== th && th === S.cur && Date.now() < end) await new Promise((ok) => setTimeout(ok, 40));
+  while (th === S.cur && S.hasOlder && !S.seen.has(seq) && S.messages.length && S.messages[0].seq > seq) {
+    const before = S.messages[0].seq;
+    // 사이 글 수는 seq 차이보다 적다(seq 는 대화 전체에 걸친 번호) — 한 번에 넉넉히
+    await loadOlder(Math.min(500, before - seq + 20));
+    if (S.messages[0]?.seq === before) break; // 안 늘었다(실패·경합)
+  }
+  return S.seen.has(seq);
+}
+/** 화면에 안 불러온 옛 글까지 — 그리지 않고 받기만(스레드 만들기 후보 · 대면 모드 등) */
+async function olderHistory() {
+  const th = S.cur;
+  const upto = S.messages[0]?.seq ?? Infinity;
+  const all = [];
+  let after = 0;
+  for (;;) {
+    const r = await api('GET', `/api/threads/${th}/messages?after=${after}&limit=500`);
+    all.push(...r.messages.filter((m) => m.seq < upto));
+    if (!r.has_more || !r.messages.length || r.next_cursor >= upto) break;
+    after = r.next_cursor;
+  }
+  return all;
+}
+$('messages').addEventListener(
+  'scroll',
+  () => {
+    if (S.hasOlder && !S.olderLoading && S.mode === 'convo' && $('messages').scrollTop < OLDER_GAP) loadOlder().catch(() => {});
+  },
+  { passive: true },
+);
 $('first-msg-btn').addEventListener('click', () => $('body').focus());
 
 /** 커서 이후만 가져온다. 재접속·알림 모두 이 한 길로. onPage(받은 수, 커서) 는 복구 진행률용 */
@@ -1119,14 +1277,21 @@ async function fetchNew(onPage) {
   let added = 0;
   fetching = (async () => {
     for (;;) {
-      const r = await api('GET', `/api/threads/${th}/messages?after=${S.cursor}&limit=200`);
+      // 처음 읽기(아무것도 안 그린 대화)는 맨 끝 PAGE 개만 — 옛 글은 위로 굴리면 loadOlder 가 받는다(마스터 #1732)
+      const first = S.cursor === 0 && S.messages.length === 0;
+      const r = await api('GET', first ? `/api/threads/${th}/messages?tail=1&limit=${PAGE}` : `/api/threads/${th}/messages?after=${S.cursor}&limit=200`);
       if (th !== S.cur) return;
-      for (const m of r.messages) if (insertMsg(m)) added++;
+      if (first) {
+        S.hasOlder = r.has_more;
+        $('messages').append(...r.messages.filter((m) => !S.seen.has(m.seq)).map((m) => (S.seen.add(m.seq), S.messages.push(m), added++, msgEl(m, false))));
+      } else for (const m of r.messages) if (insertMsg(m)) added++;
       S.cursor = Math.max(S.cursor, r.next_cursor);
-      if (onPage) onPage(added, S.cursor, r.has_more);
-      if (!r.has_more) break;
+      if (onPage) onPage(added, S.cursor, !first && r.has_more);
+      if (first || !r.has_more) break;
     }
     S.lastSync = Date.now();
+    S.opened = th;
+    syncOlder();
   })().finally(() => {
     fetching = null;
     if (fetchAgain && th === S.cur) {
@@ -1154,6 +1319,41 @@ function nearBottom() {
 function scrollBottom() {
   const m = $('messages');
   m.scrollTop = m.scrollHeight;
+  syncToBottom();
+}
+// ───── 가장 아래로(마스터 #1700): 지금 보이는 스크롤 칸(대화 #messages · 태그 방 #tag-page)이 바닥에서 멀면 우하단에 뜬다 ─────
+const TO_BOTTOM_GAP = 240; // 바닥에서 이만큼(px) 넘게 떨어지면 띄운다
+function bottomScroller() {
+  if (S.mode === 'convo') return $('messages');
+  if (S.mode === 'tag') return $('tag-page');
+  return null;
+}
+function syncToBottom() {
+  const b = $('to-bottom');
+  if (!b) return;
+  const sc = bottomScroller();
+  const far = !!sc && sc.offsetParent !== null && sc.scrollHeight - sc.scrollTop - sc.clientHeight > TO_BOTTOM_GAP;
+  b.hidden = !far;
+  if (!far) return;
+  const r = sc.getBoundingClientRect();
+  b.style.right = `${Math.max(12, window.innerWidth - r.right + 18)}px`;
+  b.style.bottom = `${Math.max(12, window.innerHeight - r.bottom + 18)}px`;
+}
+$('to-bottom').addEventListener('click', () => {
+  const sc = bottomScroller();
+  if (!sc) return;
+  if (sc.scrollTo) sc.scrollTo({ top: sc.scrollHeight, behavior: 'smooth' });
+  else sc.scrollTop = sc.scrollHeight;
+  $('to-bottom').hidden = true;
+});
+for (const id of ['messages', 'tag-page']) $(id).addEventListener('scroll', syncToBottom, { passive: true });
+window.addEventListener('resize', syncToBottom);
+// 새 글이 붙거나 목록이 다시 그려지면 바닥까지 거리가 바뀐다 — 스크롤 없이도 다시 잰다
+{
+  let q = 0;
+  const later = () => q || (q = requestAnimationFrame(() => ((q = 0), syncToBottom())));
+  const mo = new MutationObserver(later);
+  for (const id of ['messages', 'tg-msgs']) mo.observe($(id), { childList: true, subtree: true });
 }
 
 function msgEl(m, inherited) {
@@ -1170,7 +1370,7 @@ function msgEl(m, inherited) {
     m.recipients.length
       ? el('span', { class: m.source_kind === 'request' ? 'req-route' : null }, m.source_kind === 'request' ? `${pname(m.author_id)} → ${m.recipients.map(pname).join(', ')}` : `→ ${m.recipients.map(pname).join(', ')}`)
       : null,
-    m.reply_to_seq ? el('a', { href: `#m${m.reply_to_seq}`, onclick: (e) => (e.preventDefault(), jumpTo(m.reply_to_seq)) }, `↩ #${m.reply_to_seq}`) : null,
+    m.reply_to_seq ? el('a', { href: `#m${m.reply_to_seq}`, onclick: (e) => (e.preventDefault(), goSeq(m.reply_to_seq)) }, `↩ #${m.reply_to_seq}`) : null,
     mine && !inherited && S.sentKeys.has(m.client_key) ? el('span', { class: 'sendst ok' }, t('app.sent_ok')) : null,
   );
   // 답장·복사·분기는 머리가 아니라 글 아래 한 줄에 «전달…» 과 나란히(마스터 #327) — 전달 칸(.fwdslot)은 renderRunLines 가 채운다
@@ -1186,6 +1386,7 @@ function msgEl(m, inherited) {
       el('button', { type: 'button', onclick: () => openFork(m.seq) }, t('app.branch_here')),
     ),
   );
+  const tagLine = tagChips(m);
   const body = el('div', { class: 'body' });
   body._src = m.body;
   if (m.merge) body.append(mergeBox(m));
@@ -1218,9 +1419,280 @@ function msgEl(m, inherited) {
     'article',
     { class: `msg${agent ? ' agent' + agentTone(m.author_id) : ''}${mine ? ' mine' : ''}${inherited ? ' inherited' : ''}`, id: inherited ? `c${m.seq}` : `m${m.seq}`, 'aria-label': `${pname(m.author_id)} #${m.seq}` },
     el('span', { class: 'avatar', 'aria-hidden': 'true' }, initials(m.author_id)),
-    el('div', { class: 'main' }, head, body, ...atts, inherited ? null : el('div', { class: 'runlines', 'data-seq': String(m.seq) }), bar),
+    el('div', { class: 'main' }, head, tagLine, body, ...atts, inherited ? null : el('div', { class: 'runlines', 'data-seq': String(m.seq) }), bar),
   );
 }
+// ───── 태그(마이그레이션 19 · 마스터 #1475): 글의 태그 칩 · 사이드바 목록 · 태그 보기 페이지(#tag/<id> · 1단계는 읽기 전용 보기) ─────
+const tagHref = (id) => `#tag/${encodeURIComponent(id)}`;
+const tagById = (id) => S.tags.find((x) => x.id === id);
+/** rank = 주 태그 순서 이름(마스터 #1674): 'main'·'sub'·'ref' — 주 태그가 둘 이상일 때만 붙인다 · 하나면 이름표 없음 */
+function tagChip(tg, inline, rank = null) {
+  const lbl = inline ? t('app.tag_inline') : rank ? t(`app.tag_${rank}`) : null;
+  return el(
+    'a',
+    { class: `tag-chip${inline ? ' inline' : ''}${rank ? ` rank-${rank}` : ''}`, href: tagHref(tg.id), title: inline ? t('app.tag_inline_title') : rank ? t(`app.tag_${rank}_title`) : null },
+    `#${tg.name}`,
+    lbl ? el('span', { class: 'faint' }, lbl) : null,
+  );
+}
+const tagRank = (i, n) => (n < 2 ? null : i === 0 ? 'main' : i === 1 ? 'sub' : 'ref');
+/** 글의 태그 줄 — 주 태그 뒤에 인라인. 둘 다 비면 null */
+function tagChips(m) {
+  const tg = m.tags;
+  if (!tg || (!tg.primary?.length && !tg.inline?.length)) return null;
+  return el('div', { class: 'tags' }, ...(tg.primary ?? []).map((x, i, a) => tagChip(x, false, tagRank(i, a.length))), ...(tg.inline ?? []).map((x) => tagChip(x, true)));
+}
+/** 새 글이 오면 태그 목록(거리 순)을 다시 읽는다 — 글마다 부르지 않게 묶음 */
+let tagReloadTimer = null;
+function tagsSoon() {
+  clearTimeout(tagReloadTimer);
+  tagReloadTimer = setTimeout(() => loadTags().catch(() => {}), 1500);
+}
+async function loadTags() {
+  const r = await api('GET', '/api/tags?archived=1');
+  S.tags = r.tags ?? [];
+  S.defaultAgent = r.default_agent ?? null;
+  renderTagList();
+  renderTagAdmin();
+  renderTagPick();
+}
+function tagRecipientLine(tg) {
+  if (!tg.recipient_id) return t('app.tag_recipient_none');
+  return tg.owner_id ? t('app.tag_recipient', { name: pname(tg.recipient_id) }) : t('app.tag_recipient_default', { name: pname(tg.recipient_id) });
+}
+/** 거리 단계 — 마지막 부름 뒤 지난 시간(사양 6절 D10 · 마스터 #1510). 0 하루 안 · 1 일주일 안 · 2 한 달 안 · 3 그 밖 · 4 부른 적 없음 */
+const DAY = 86400000;
+function tagBand(tg, now = Date.now()) {
+  if (!tg.last_called_at) return 4;
+  const d = now - tg.last_called_at;
+  return d < DAY ? 0 : d < 7 * DAY ? 1 : d < 30 * DAY ? 2 : 3;
+}
+function tagItem(tg) {
+  const active = S.mode === 'tag' && S.tagCur === tg.id;
+  const band = tagBand(tg);
+  return el(
+    'a',
+    { class: `conv-item tag-item orbit-${band}${active ? ' active' : ''}${tg.archived_at ? ' archived' : ''}`, href: tagHref(tg.id), 'aria-current': active ? 'page' : null },
+    el(
+      'div',
+      { class: 'l1' },
+      el('span', { class: 'orbit-dot', 'aria-hidden': 'true' }),
+      el('span', { class: 'ttl' }, `#${tg.name}`),
+      tg.archived_at ? el('span', { class: 'badge' }, t('app.tag_archived')) : null,
+    ),
+    el('div', { class: 'l2' }, `${tagRecipientLine(tg)} · ${t(`app.tag_band_${band}`)}`),
+  );
+}
+function renderTagList() {
+  const nav = $('tag-list');
+  if (!nav) return;
+  const showArchived = $('tag-show-archived').checked;
+  const live = S.tags.filter((x) => !x.archived_at);
+  const archived = S.tags.filter((x) => !!x.archived_at);
+  const items = live.map(tagItem);
+  if (showArchived && archived.length) {
+    const d = el('details', { open: store('bs.tags-archived-open') === '1' ? '' : null }, el('summary', {}, t('app.tag_archived_n', { n: archived.length })), ...archived.map(tagItem));
+    d.addEventListener('toggle', () => store('bs.tags-archived-open', d.open ? '1' : '0'));
+    items.push(d);
+  }
+  nav.replaceChildren(...(items.length ? items : [el('div', { class: 'empty-list' }, t('app.no_tags'))]));
+}
+$('tag-show-archived').addEventListener('change', () => {
+  store('bs.tags-archived', $('tag-show-archived').checked ? '1' : '0');
+  renderTagList();
+});
+$('tag-show-archived').checked = store('bs.tags-archived') === '1';
+/** 태그 보기 페이지 — 그 태그가 주 태그이거나 인라인으로 든 글을 seq 순으로 전부(읽기 전용 · 글쓰기 칸은 다음 조각) */
+let tagLoading = null;
+/** 태그 페이지 스크롤(마스터 #1594): 처음 열 때·글을 보낸 뒤·바닥 근처였으면 맨 아래로 — 위로 굴려 읽던 중이면 그 자리를 지킨다.
+ *  S.tagShown = 지금 화면에 그려 둔 태그(다른 화면으로 가면 setMode 가 지운다) */
+function tagNearBottom() {
+  const p = $('tag-page');
+  return p.scrollHeight - p.scrollTop - p.clientHeight < 80;
+}
+async function showTag(id, opts = {}) {
+  const page = $('tag-page');
+  const same = S.tagShown === id;
+  const stick = !!opts.bottom || !same || tagNearBottom();
+  const keepTop = page.scrollTop;
+  S.tagCur = id;
+  if (!tagById(id)) await loadTags().catch(() => {});
+  const tg = tagById(id);
+  renderTagList();
+  $('tg-h').textContent = tg ? `#${tg.name}` : t('app.tag_not_found');
+  $('tg-readonly').hidden = !tg?.archived_at;
+  $('tg-meta').textContent = tg ? tagRecipientLine(tg) : '';
+  $('tg-empty').hidden = true;
+  renderTagPageAdmin(tg);
+  renderTagCompose(tg);
+  const box = $('tg-msgs');
+  // 같은 태그를 다시 읽을 때는 비우지 않는다 — 비우면 높이가 줄어 스크롤이 맨 위로 튄다
+  if (!same || !tg) box.replaceChildren();
+  S.tagShown = tg ? id : null;
+  if (!tg) return;
+  const key = {};
+  tagLoading = key;
+  const all = [];
+  let after = 0;
+  for (;;) {
+    const r = await api('GET', `/api/tags/${encodeURIComponent(id)}/messages?after=${after}&limit=200`);
+    if (tagLoading !== key || S.tagCur !== id) return;
+    all.push(...r.messages);
+    after = Math.max(after, r.next_cursor ?? 0);
+    if (!r.has_more || !r.messages.length) break;
+  }
+  box.replaceChildren(...all.map(tagMsgEl));
+  // 답장 기본(마스터 #1791): 이 태그 방에서 쓰는 글은 방 안 직전 글(루트 채팅방의 것)에 답장한다 — 직전 글이 바뀌면 «답장 안 함»도 풀린다
+  const rid = room()?.id;
+  const last = [...all].reverse().find((x) => x.thread_id === rid) ?? null;
+  if (S.tagReply?.tag !== id || S.tagReply?.seq !== last?.seq) S.tagReply = { tag: id, seq: last?.seq ?? null, author: last?.author_id ?? null, off: false };
+  renderTagReply();
+  if (stick) {
+    page.scrollTop = page.scrollHeight;
+    // 그림이 늦게 그려지며 높이가 늘면 다시 바닥으로(그사이 위로 굴렸으면 안 따라감)
+    for (const img of box.querySelectorAll('img'))
+      if (!img.complete) img.addEventListener('load', () => S.tagShown === id && page.scrollHeight - page.scrollTop - page.clientHeight < img.clientHeight + 80 && (page.scrollTop = page.scrollHeight), { once: true });
+  } else page.scrollTop = keepTop;
+  $('tg-empty').hidden = all.length > 0;
+  $('tg-meta').textContent = `${tagRecipientLine(tg)} · ${t('app.tag_count', { n: all.length })}`;
+}
+/** 태그 페이지의 글 — 대화 화면의 글(msgEl)에서 대화에 묶인 단추(답장·분기·전달)를 뺀다 */
+function tagMsgEl(m) {
+  const node = msgEl(m, true);
+  node.removeAttribute('id');
+  node.classList.add('tagview');
+  node.dataset.tagSeq = String(m.seq); // 답장 줄(#1791)이 이 글로 굴러 갈 자리
+  for (const b of node.querySelectorAll('.actions button')) if (b.textContent !== t('app.copy')) b.remove();
+  return node;
+}
+$('tg-reload').addEventListener('click', () => S.tagCur && showTag(S.tagCur));
+// ── 태그 관리(마스터만 · D2·D8·D9): 새 태그 · 담당자(비면 대표를 따름) · 보관/되살리기 · 대표 에이전트
+const agentList = () => [...S.participants.values()].filter((p) => p.kind === 'agent' && !p.disabled_at).sort((a, b) => a.name.localeCompare(b.name));
+function renderTagAdmin() {
+  const master = !!S.me?.is_master;
+  $('tag-new').hidden = !master;
+  $('tag-default-row').hidden = !master;
+  if (master) {
+    const sel = $('tag-default-agent');
+    sel.replaceChildren(el('option', { value: '' }, t('app.tag_default_none')), ...agentList().map((a) => el('option', { value: a.id, selected: S.defaultAgent === a.id }, a.name)));
+  }
+}
+$('tag-default-agent').addEventListener('change', async () => {
+  const v = $('tag-default-agent').value || null;
+  try {
+    await api('PUT', '/api/settings/default-agent', { default_agent: v });
+    await loadTags();
+    if (S.mode === 'tag' && S.tagCur) showTag(S.tagCur).catch(() => {});
+  } catch (e) {
+    notify(t('app.failed_title'), e.message);
+    renderTagAdmin();
+  }
+});
+$('tag-new').addEventListener('click', async () => {
+  const input = el('input', { type: 'text', maxlength: '41', placeholder: t('app.tag_name_ph'), 'aria-label': t('app.tag_name_ph'), autocomplete: 'off' });
+  const ok = await ask({ title: t('app.tag_new_title'), text: t('app.tag_new_text'), ok: t('app.tag_new_ok'), extra: input });
+  if (!ok) return;
+  const name = input.value.trim().replace(/^#/, '');
+  if (!name) return;
+  try {
+    const r = await api('POST', '/api/tags', { name });
+    await loadTags();
+    location.hash = tagHref(r.tag.id).slice(1);
+  } catch (e) {
+    notify(t('app.failed_title'), e.message);
+  }
+});
+function renderTagPageAdmin(tg) {
+  const master = !!S.me?.is_master;
+  $('tg-admin').hidden = !master || !tg;
+  if (!master || !tg) return;
+  const def = S.defaultAgent ? t('app.tag_owner_default', { name: pname(S.defaultAgent) }) : t('app.tag_owner_default_none');
+  $('tg-owner').replaceChildren(el('option', { value: '' }, def), ...agentList().map((a) => el('option', { value: a.id, selected: tg.owner_id === a.id }, a.name)));
+  $('tg-owner').disabled = !!tg.archived_at;
+  $('tg-archive').textContent = tg.archived_at ? t('app.tag_restore') : t('app.tag_archive');
+}
+async function patchTag(id, body) {
+  try {
+    await api('PATCH', `/api/tags/${encodeURIComponent(id)}`, body);
+    await loadTags();
+    if (S.tagCur === id) await showTag(id);
+  } catch (e) {
+    notify(t('app.failed_title'), e.message);
+  }
+}
+$('tg-owner').addEventListener('change', () => S.tagCur && patchTag(S.tagCur, { owner_id: $('tg-owner').value || null }));
+$('tg-archive').addEventListener('click', async () => {
+  const tg = tagById(S.tagCur);
+  if (!tg) return;
+  if (!tg.archived_at) {
+    const ok = await ask({ title: t('app.tag_archive_title'), text: t('app.tag_archive_text', { name: tg.name }), ok: t('app.tag_archive'), danger: true });
+    if (!ok) return;
+  }
+  patchTag(tg.id, { archived: !tg.archived_at });
+});
+// ── 태그 보기 글쓰기(D1): 루트 채팅방에 들어가고 보기의 태그가 주 태그로 붙는다 · 기본 수신 = 담당자(없으면 대표) · 보관 태그면 칸 없음
+function renderTagCompose(tg) {
+  const form = $('tg-compose');
+  const r = room();
+  form.hidden = !tg || !!tg.archived_at || !r;
+  if (form.hidden) return;
+  const to = $('tg-to');
+  // 사용자가 손댄 값만 지킨다 — 담당자·대표가 바뀌면 기본값이 따라간다
+  const keep = to.dataset.tag === tg.id && to.dataset.touched === '1' ? to.value : null;
+  to.replaceChildren(el('option', { value: '' }, t('app.recipient_none')), ...agentList().map((a) => el('option', { value: a.id }, a.name)));
+  const want = keep ?? tg.recipient_id ?? '';
+  to.value = want;
+  if (to.value !== want) to.value = '';
+  if (to.dataset.tag !== tg.id) to.dataset.touched = '0';
+  to.dataset.tag = tg.id;
+}
+/** 태그 방 답장 줄(마스터 #1791) — 기본은 직전 글에 답장 · «답장 안 함»으로 끄고 «#N에 답장»으로 되켠다 */
+function renderTagReply() {
+  const box = $('tg-reply');
+  const r = S.tagReply;
+  if (!box) return;
+  box.hidden = !r || r.tag !== S.tagCur || r.seq == null;
+  if (box.hidden) return box.replaceChildren();
+  const toggle = (off) => () => ((S.tagReply.off = off), renderTagReply());
+  box.replaceChildren(
+    ...(r.off
+      ? [el('span', {}, t('app.tag_reply_none')), ' ', el('button', { type: 'button', class: 'link', onclick: toggle(false) }, t('app.tag_reply_on', { seq: r.seq }))]
+      : [
+          el('a', { href: `#m${r.seq}`, onclick: (e) => (e.preventDefault(), $('tg-msgs').querySelector(`[data-tag-seq="${r.seq}"]`)?.scrollIntoView({ block: 'center' })) }, t('app.tag_reply_to', { seq: r.seq, name: pname(r.author) })),
+          ' ',
+          el('button', { type: 'button', class: 'link', onclick: toggle(true) }, t('app.tag_reply_off')),
+        ]),
+  );
+}
+$('tg-to').addEventListener('change', () => ($('tg-to').dataset.touched = '1'));
+$('tg-compose').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const tg = tagById(S.tagCur);
+  const r = room();
+  const body = $('tg-body').value.trim();
+  if (!tg || !r || !body) return;
+  const to = $('tg-to').value;
+  const st = $('tg-send-st');
+  $('tg-send').disabled = true;
+  st.textContent = t('app.tag_sending');
+  try {
+    const res = await api('POST', `/api/threads/${r.id}/messages`, { client_key: newKey(), body, recipients: to ? [to] : [], tags: [tg.id], reply_to_seq: S.tagReply?.tag === tg.id && !S.tagReply.off && S.tagReply.seq != null ? S.tagReply.seq : undefined });
+    $('tg-body').value = '';
+    st.textContent = t('app.tag_sent', { seq: res.message.seq });
+    if (to && res.message.seq) markAwait(r.id, res.message.seq);
+    await showTag(tg.id, { bottom: true });
+  } catch (err) {
+    st.textContent = t('app.tag_send_failed', { msg: err.message });
+  } finally {
+    $('tg-send').disabled = false;
+  }
+});
+$('tg-body').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+    e.preventDefault();
+    $('tg-compose').requestSubmit();
+  }
+});
 // ───── 합침 묶음(#706): 하위 스레드에서 옮긴 글을 한 상자로 · 펼치면 그 글들을 하위 스레드에서 읽어 온다 ─────
 function mergeBox(m) {
   const g = m.merge;
@@ -1362,11 +1834,104 @@ $('t-md').addEventListener('click', () => {
   announce(plain ? t('app.view_raw') : t('app.view_markdown'));
 });
 
-function jumpTo(seq) {
+// 본문 «#1533» 링크(마스터 #1537): 이 화면에 그 글이 있으면 그리로 · 없으면 서버에 그 글의 대화를 물어 열고 그 글로 간다
+document.addEventListener(
+  'click',
+  (e) => {
+    const a = e.target instanceof Element ? e.target.closest('a.seq-link') : null;
+    if (!a || e.ctrlKey || e.metaKey || e.shiftKey || e.button) return;
+    e.preventDefault();
+    e.stopPropagation();
+    goSeq(Number(a.dataset.seq));
+  },
+  true,
+);
+async function goSeq(seq) {
+  const here = () => (S.mode === 'convo' ? ($(`m${seq}`) ?? $(`c${seq}`)) : null);
+  if (here()) {
+    // 같은 대화 안: 떠나는 자리를 지금 기록에 적고 같은 주소로 한 칸 쌓는다 — 뒤로가기는 popstate 로 그 자리에 돌아온다(마스터 #1704)
+    savePos();
+    history.pushState({ bsJump: seq }, '', location.href);
+    return jumpTo(seq, true);
+  }
+  let r;
+  try {
+    r = await api('GET', `/api/messages/${seq}`);
+  } catch {
+    return notify(t('app.seq_missing_title'), t('app.seq_missing', { seq }));
+  }
+  savePos();
+  if (S.mode !== 'convo' || S.cur !== r.thread_id) location.hash = r.thread_id;
+  else history.pushState(null, '', location.href);
+  history.replaceState({ bsJump: seq }, '', location.href);
+  const end = Date.now() + 6000;
+  while (!here() && Date.now() < end) {
+    // 안 불러온 옛 글이면 그 글까지 받는다(마스터 #1732 — 방은 최근 글만 연다)
+    if (S.mode === 'convo' && S.cur === r.thread_id && S.opened === r.thread_id && S.hasOlder) await ensureSeq(seq);
+    if (!here()) await new Promise((ok) => setTimeout(ok, 80)); // ensureSeq 가 받을 게 없어 바로 돌아와도 빈 바퀴로 화면을 붙들지 않게
+  }
+  if (here()) jumpTo(seq, true);
+  else notify(t('app.seq_missing_title'), t('app.seq_not_loaded', { seq }));
+}
+// ───── 글 링크 뒤로가기(마스터 #1704): 링크로 떠나기 전 읽던 자리를 history.state 에 적어 두고, 돌아오면 그 자리로 ─────
+// 자리 = 화면 맨 위에 걸린 글의 번호 + 그 글이 칸 위에서 떨어진 px(다시 읽어 높이가 달라져도 같은 글에 붙는다) · 못 찾으면 scrollTop
+function readPos() {
+  const sc = bottomScroller();
+  if (!sc) return null;
+  const top = sc.getBoundingClientRect().top;
+  for (const e of sc.querySelectorAll('.msg[id]')) {
+    const b = e.getBoundingClientRect();
+    if (b.bottom > top + 1) return { mode: S.mode, id: e.id, off: b.top - top, top: sc.scrollTop };
+  }
+  return { mode: S.mode, id: null, off: 0, top: sc.scrollTop };
+}
+function savePos() {
+  const pos = readPos();
+  if (pos) history.replaceState({ ...(history.state ?? {}), bsPos: pos }, '', location.href);
+}
+async function restorePos(st) {
+  if (st?.bsPos) {
+    const p = st.bsPos;
+    const end = Date.now() + 6000;
+    const find = () => (S.mode === p.mode && p.id ? bottomScroller()?.querySelector(`[id="${p.id}"]`) : null); // 태그 방과 대화가 같은 id 를 쓸 수 있어 지금 칸 안에서만
+    const mseq = p.mode === 'convo' && /^m\d+$/.test(p.id ?? '') ? Number(p.id.slice(1)) : null;
+    while (p.id && !find() && Date.now() < end) {
+      // 떠났던 글이 다시 열린 대화의 최근 창보다 옛 글이면 그 글까지 받는다(마스터 #1732)
+      if (mseq && S.mode === 'convo' && S.opened === S.cur && S.hasOlder) await ensureSeq(mseq);
+      if (!find()) await new Promise((ok) => setTimeout(ok, 80));
+    }
+    const sc = bottomScroller();
+    if (!sc || S.mode !== p.mode) return;
+    const e = find();
+    if (e) sc.scrollTop += e.getBoundingClientRect().top - sc.getBoundingClientRect().top - p.off;
+    else sc.scrollTop = p.top;
+    syncToBottom();
+  } else if (st?.bsJump) {
+    // 앞으로가기로 링크 자리에 다시 올 때
+    const end = Date.now() + 6000;
+    while (!($(`m${st.bsJump}`) ?? $(`c${st.bsJump}`)) && Date.now() < end) {
+      if (S.mode === 'convo' && S.opened === S.cur && S.hasOlder) await ensureSeq(st.bsJump);
+      if (!($(`m${st.bsJump}`) ?? $(`c${st.bsJump}`))) await new Promise((ok) => setTimeout(ok, 80));
+    }
+    jumpTo(st.bsJump, false);
+  }
+}
+let popPending = null; // 주소가 바뀌는 뒤로가기는 hashchange 의 route() 가 끝난 뒤에 자리를 되살린다
+window.addEventListener('popstate', (e) => {
+  if (location.hash === lastHash) restorePos(e.state);
+  else popPending = e.state;
+});
+function jumpTo(seq, flash) {
   const e = $(`m${seq}`) ?? $(`c${seq}`);
   if (e) {
     if (e.closest('details')) e.closest('details').open = true;
     e.scrollIntoView({ block: 'center' });
+    if (flash) {
+      e.classList.remove('flash');
+      void e.offsetWidth;
+      e.classList.add('flash');
+      setTimeout(() => e.classList.remove('flash'), 1600);
+    }
   }
 }
 function setReply(m) {
@@ -1379,12 +1944,36 @@ function setReply(m) {
     onChip(chip);
   }
   renderReplyInfo();
+  inheritReplyTags(m);
   $('body').focus();
+}
+/** 답장하면 원글의 주 태그를 글 첫 줄 태그 줄로 들고 온다(마스터 #1671 · 순서 그대로 · 개수 제한 없음 #1674) — 보관 태그는 뺀다 · 칸에 이미 태그 줄이 있으면 사용자 것을 지킨다.
+ *  넣은 뒤 손대지 않은 채 답장을 취소하면 넣기 전 글로 되돌린다(S.replyTagLine·replyTagPrev). */
+function inheritReplyTags(m) {
+  const ta = $('body');
+  if (S.replyTagLine != null && ta.value === S.replyTagLine) ta.value = S.replyTagPrev ?? ''; // 손대지 않은 채 다른 글에 답장하면 그 글의 태그로 갈아 낀다
+  S.replyTagLine = null;
+  const live = new Set((S.tags ?? []).filter((x) => !x.archived_at).map((x) => x.id));
+  const names = (m.tags?.primary ?? []).filter((x) => live.has(x.id)).map((x) => x.name);
+  if (!names.length || headTagLine(ta.value).idx >= 0) return;
+  const line = names.map((n) => `#${n}`).join(' ');
+  const rest = ta.value.replace(/^\n+/, '');
+  S.replyTagPrev = ta.value;
+  ta.value = `${line}\n${rest}`; // 본문은 둘째 줄부터 — 첫 줄 «#A ␣» 뒤에 치면 태그로 바뀐다(#1531)
+  S.replyTagLine = ta.value;
+  ta.dispatchEvent(new Event('input', { bubbles: true }));
+  ta.setSelectionRange(ta.value.length, ta.value.length);
 }
 function clearReply() {
   S.replyTo = null;
   S.replyAuthor = null;
   $('reply-info').hidden = true;
+  const ta = $('body');
+  if (S.replyTagLine != null && ta.value === S.replyTagLine) {
+    ta.value = S.replyTagPrev ?? ''; // 넣기 전 글로 되돌린다
+    ta.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+  S.replyTagLine = null;
 }
 /** 답장은 «어느 글에 대한 것인가» 표시일 뿐 전달이 아니다 — 서버는 수신 대상(recipients)에게만 전달한다.
  *  원글이 에이전트 글인데 그 에이전트가 수신 대상에 없으면 작게 알린다. */
@@ -1414,12 +2003,38 @@ async function loadRuns() {
   if (!th) return;
   const [r, d] = await Promise.all([api('GET', `/api/threads/${th}/runs`), api('GET', `/api/threads/${th}/deliveries`)]);
   if (th !== S.cur) return;
+  const atBottom = S.mode === 'convo' && nearBottom();
   S.runs = r.runs;
   S.deliveries = d.deliveries;
   renderRunLines();
   renderSummary();
   renderWait();
   if (S.auxOpen && S.tab === 'runs') renderRunsTab();
+  // 실행 줄·대기 띠가 생기면 대화 칸이 줄거나 길어진다 — 바닥에 있었으면 바닥에 둔다(방을 열 때 실행 목록이 글보다 늦게 오면 띠만큼 떠 있었다)
+  if (atBottom && !nearBottom()) scrollBottom();
+}
+/** 실행 알림이 몰려 올 때(경과 줄이 잇달아 오는 등) 한 번으로 묶는다 — 읽는 중이면 끝난 뒤 한 번 더(마스터 #1732) */
+let runsTimer = 0;
+let runsBusy = null;
+let runsAgain = false;
+function runsSoon() {
+  if (runsTimer) return;
+  runsTimer = setTimeout(() => {
+    runsTimer = 0;
+    if (runsBusy) {
+      runsAgain = true;
+      return;
+    }
+    runsBusy = loadRuns()
+      .catch(() => {})
+      .finally(() => {
+        runsBusy = null;
+        if (runsAgain) {
+          runsAgain = false;
+          runsSoon();
+        }
+      });
+  }, 120);
 }
 const activeRun = (r) => r.state === 'queued' || r.state === 'running';
 /** 전달만 있고 아직 실행이 안 생긴 것(«전달 대기») */
@@ -1498,17 +2113,56 @@ function runLineEl(r) {
     return el('div', { class: 'runline cancel' }, el('span', { class: 'badge st-succeeded' }, t('app.outcome_completed_first')), t('app.completed_first_line', { name: pname(r.agent_id) }), look);
   return null;
 }
+// 글마다 지난번에 그린 입력의 서명 — 같으면 그 글의 실행 줄·전달 칸을 다시 만들지 않는다(마스터 #1732: 실행 알림마다 모든 글을 다시 그려 글이 많으면 느렸다)
+let runLineSig = new WeakMap();
+const groupBy = (list, key) => {
+  const m = new Map();
+  for (const x of list) {
+    const k = key(x);
+    const a = m.get(k);
+    if (a) a.push(x);
+    else m.set(k, [x]);
+  }
+  return m;
+};
 function renderRunLines() {
+  const runsBy = groupBy(S.runs, (r) => r.trigger_seq);
+  const delsBy = groupBy(S.deliveries, (x) => x.message_seq);
+  const holdsBy = groupBy(S.detail?.request_holds ?? [], (h) => h.request_seq);
+  const msgBy = new Map(S.messages.map((m) => [m.seq, m]));
+  const th = S.detail?.thread;
+  // 모든 글에 같은 값 — 바뀌면 전부 다시
+  const common = JSON.stringify([
+    !!S.me?.is_master,
+    !!S.detail,
+    isNarrow(),
+    I18N.locale,
+    !!th?.invoke_paused,
+    th?.status,
+    !!th?.deleted_at,
+    (S.detail?.members ?? []).filter((x) => x.kind === 'agent' && x.can_read).map((x) => x.participant_id),
+    S.cancelAckMs,
+  ]);
+  let atBottom = null;
   for (const box of document.querySelectorAll('#messages .runlines')) {
     const seq = Number(box.dataset.seq);
+    const runs = runsBy.get(seq) ?? [];
+    const dels = delsBy.get(seq) ?? [];
+    const holds = holdsBy.get(seq) ?? [];
+    const m = msgBy.get(seq);
+    // 화면에 그리는 칸은 이것들로만 정해진다(경과 초는 1초 타이머가 따로 고친다)
+    const sig = `${common}|${JSON.stringify([runs, dels, holds, m?.author_id, m?.handoff_to, m?.pull_req])}`;
+    if (runLineSig.get(box) === sig) continue;
+    runLineSig.set(box, sig);
+    if (atBottom === null) atBottom = S.mode === 'convo' && nearBottom(); // 바꾸기 전에 한 번만 — 바닥에 있었으면 늘어난 줄 뒤에도 바닥에 둔다
     const lines = [];
     const byAgent = new Map();
-    for (const r of S.runs) if (r.trigger_seq === seq && (!byAgent.has(r.agent_id) || byAgent.get(r.agent_id).generation < r.generation)) byAgent.set(r.agent_id, r);
+    for (const r of runs) if (!byAgent.has(r.agent_id) || byAgent.get(r.agent_id).generation < r.generation) byAgent.set(r.agent_id, r);
     for (const r of byAgent.values()) {
       const l = runLineEl(r);
       if (l) lines.push(l);
     }
-    for (const x of S.deliveries.filter((x) => x.message_seq === seq && !byAgent.has(x.recipient_id))) {
+    for (const x of dels.filter((x) => !byAgent.has(x.recipient_id))) {
       if (x.status === 'pending' || x.status === 'leased')
         lines.push(
           el(
@@ -1524,7 +2178,7 @@ function renderRunLines() {
       else if (x.status === 'dead') lines.push(el('div', { class: 'runline bad' }, el('span', { class: 'badge st-dead' }, t('app.delivery_failed')), `${pname(x.recipient_id)} — ${t('app.too_many_attempts')}`));
       else if (x.status === 'cancelled') lines.push(el('div', { class: 'runline cancel' }, el('span', { class: 'badge st-cancelled' }, t('app.delivery_withdrawn')), `${pname(x.recipient_id)}${x.last_error ? ` — ${RUN_ERR[x.last_error] ?? x.last_error}` : ''}`));
     }
-    for (const h of (S.detail?.request_holds ?? []).filter((x) => x.request_seq === seq))
+    for (const h of holds)
       lines.push(
         el(
           'div',
@@ -1534,12 +2188,14 @@ function renderRunLines() {
           h.acked_at ? el('span', { class: 'muted small' }, t('app.acked_suffix')) : null,
         ),
       );
-    const fb = forwardBar(seq);
-    box.parentElement?.querySelector(':scope > .msgbar > .fwdslot')?.replaceChildren(...(fb ? [fb] : []));
-    const pb = pullBar(seq);
+    const fb = forwardBar(seq, m, dels);
+    const slot = box.parentElement?.querySelector(':scope > .msgbar > .fwdslot');
+    if (slot && (fb || slot.firstChild)) slot.replaceChildren(...(fb ? [fb] : []));
+    const pb = pullBar(seq, m, dels);
     if (pb) lines.push(pb);
-    box.replaceChildren(...lines);
+    if (lines.length || box.firstChild) box.replaceChildren(...lines);
   }
+  if (atBottom && !nearBottom()) scrollBottom();
 }
 
 // ───── 수동 전달(2026-10-12 마스터 #62) — 에이전트 글을 다른 에이전트에게. 마스터가 눌러야만 간다 ─────
@@ -1553,15 +2209,14 @@ function fwdNoteEl(x) {
   const one = x.forward_note.replace(/\s+/g, ' ');
   return el('span', { class: 'fwd-note-line small', title: x.forward_note }, t('app.note_suffix', { text: one.length > 80 ? one.slice(0, 80) + '…' : one }));
 }
-function forwardBar(seq) {
+function forwardBar(seq, m = S.messages.find((x) => x.seq === seq), dels = S.deliveries.filter((x) => x.message_seq === seq)) {
   if (!S.me?.is_master || !S.detail) return null;
-  const m = S.messages.find((x) => x.seq === seq);
   if (!m || !isAgent(m.author_id)) return null;
   const cands = forwardCandidates(m);
   if (!cands.length) return null;
   // 거둔 전달(실행 없음)은 다시 보낼 수 있다 — 버튼을 되살린다
   const sent = new Map(
-    S.deliveries.filter((x) => x.message_seq === seq && !((x.status === 'cancelled' || x.status === 'dead') && !x.run_id)).map((x) => [x.recipient_id, x]),
+    dels.filter((x) => !((x.status === 'cancelled' || x.status === 'dead') && !x.run_id)).map((x) => [x.recipient_id, x]),
   );
   const paused = !!S.detail.thread.invoke_paused;
   const closed = S.detail.thread.status !== 'open' || !!S.detail.thread.deleted_at;
@@ -1605,11 +2260,10 @@ function forwardBar(seq) {
 }
 // ───── 맥락 끌어오기(2026-10-13 마스터 #162) — 에이전트가 끝줄 «← 스레드»로 청하면 마스터가 눌러 그 에이전트에게 건넨다 ─────
 const pullLabel = (q) => `«${q.title}»${q.from_seq ? ` #${q.from_seq}${q.to_seq && q.to_seq !== q.from_seq ? `~#${q.to_seq}` : ''}` : ''}`;
-function pullBar(seq) {
+function pullBar(seq, m = S.messages.find((x) => x.seq === seq), dels = S.deliveries.filter((x) => x.message_seq === seq)) {
   if (!S.me?.is_master || !S.detail) return null;
-  const m = S.messages.find((x) => x.seq === seq);
   if (!m || !m.pull_req) return null;
-  const d = S.deliveries.find((x) => x.message_seq === seq && x.recipient_id === m.author_id && x.pulled_from);
+  const d = dels.find((x) => x.recipient_id === m.author_id && x.pulled_from);
   const live = d && !((d.status === 'cancelled' || d.status === 'dead') && !d.run_id);
   // 카드: 무엇을 언제 누구에게 건넸나(메시지가 아니라 배달 기록의 표시 — 스레드에 글을 만들지 않는다)
   if (live)
@@ -2097,9 +2751,17 @@ setInterval(() => {
 }, 15000);
 
 // ───── 스레드 생성 2단계 ─────
-function openFork(seq) {
+async function openFork(seq, opts = {}) {
   if (!S.detail) return;
-  const cands = [...S.context, ...S.messages].sort((a, b) => a.seq - b.seq);
+  // 후보는 대화 전체 — 화면에 안 불러온 옛 글까지(«분기 시점까지 전부»가 옛 글을 빠뜨리지 않게 · 마스터 #1732). 옛 글이 없으면 기다리지 않는다
+  const th = S.cur;
+  const older = S.hasOlder ? await olderHistory().catch(() => null) : [];
+  if (th !== S.cur) return;
+  if (older === null) {
+    notify(t('app.new_thread'), t('app.load_failed'));
+    return;
+  }
+  const cands = [...S.context, ...older, ...S.messages].sort((a, b) => a.seq - b.seq);
   if (!cands.length) {
     notify(t('app.new_thread'), t('app.fork_no_messages'));
     return;
@@ -2116,7 +2778,7 @@ function openFork(seq) {
     busy: false,
     back: document.activeElement,
   };
-  $('fork-title').value = '';
+  $('fork-title').value = opts.title ?? '';
   $('fork-error').hidden = true;
   $('fork-modal').hidden = false;
   forkStep(1);
@@ -2268,6 +2930,7 @@ async function submitFork() {
     await loadThreads();
     if (pc) {
       history.replaceState(null, '', `${location.pathname}#${r.thread.id}`);
+      lastHash = location.hash;
       await route();
       fillCompose(pc.text, pc.to);
     } else location.hash = r.thread.id;
@@ -2443,7 +3106,13 @@ $('composer').addEventListener('submit', async (e) => {
   const item = { thread: S.cur, payload, files, state: 'sending' };
   S.outbox.push(item);
   $('body').value = '';
+  renderTagPick();
   S.prefillTo = null;
+  // 메모는 한 번만 — 보낸 뒤 수신 대상을 직전 대화 상대로 되돌린다(마스터 #1535). 사람에게 보낸 것은 그대로 둔다
+  if (memoChosen()) {
+    S.rcptPick = null;
+    renderRecipients();
+  } else if (recipients.length) S.rcptPick = { thread: S.cur, to: recipients, memo: false };
   syncMore();
   clearReply();
   $('empty-thread').hidden = true;
@@ -2451,8 +3120,23 @@ $('composer').addEventListener('submit', async (e) => {
   await send(item);
 });
 // Enter·Ctrl+Enter = 보내기 · Shift+Enter = 줄바꿈(마스터 #271). 한글 조합 중의 Enter 는 글자 확정이라 보내지 않는다
+// 터치 키보드(마우스 없는 폰·태블릿)는 Enter = 줄바꿈 · 보내기는 «보내기» 단추로만(마스터 #1618) — 화면 키보드에는 Shift+Enter 가 없다.
+// 키보드의 Enter 키 모양도 맞춘다(enterkeyhint: 터치 «↵ 줄바꿈» · 그 밖 «전송»). 붙인 실물 키보드의 Ctrl+Enter 는 그대로 보낸다
+const touchKeys = () => typeof matchMedia === 'function' && matchMedia('(hover: none) and (pointer: coarse)').matches;
+function syncEnterMode() {
+  const b = $('body');
+  const touch = touchKeys();
+  b.setAttribute('enterkeyhint', touch ? 'enter' : 'send');
+  const key = touch ? 'html.composer.placeholderTouch' : 'html.composer.placeholder';
+  b.setAttribute('data-i18n-attr', `placeholder:${key}`);
+  b.placeholder = t(key);
+}
+syncEnterMode();
+window.__syncEnterMode = syncEnterMode; // 시험용
+if (typeof matchMedia === 'function') matchMedia('(hover: none) and (pointer: coarse)').addEventListener?.('change', syncEnterMode);
 $('body').addEventListener('keydown', (e) => {
   if (e.key !== 'Enter' || e.shiftKey || e.altKey || e.isComposing || e.keyCode === 229) return;
+  if (touchKeys() && !e.ctrlKey && !e.metaKey) return; // 줄바꿈은 브라우저 기본 동작
   e.preventDefault();
   $('composer').requestSubmit();
 });
@@ -2557,14 +3241,22 @@ function connectWs() {
     } else if (n.t === 'msg' && n.thread_id === S.cur) {
       if (S.seen.has(n.seq)) reloadMessages();
       else fetchNew();
+      if (S.mode === 'tag' && S.tagCur) showTag(S.tagCur).catch(() => {});
+      tagsSoon();
       loadThreads().catch(() => {});
       loadRuns().catch(() => {}); // 새 글이 전달(전달 대기)을 만들었을 수 있다
       refreshRunsPage();
     } else if (n.t === 'msg') {
       loadThreads().catch(() => {});
+      tagsSoon();
       refreshRunsPage();
+      if (S.mode === 'tag' && S.tagCur) showTag(S.tagCur).catch(() => {});
+    } else if (n.t === 'tag') {
+      loadTags()
+        .then(() => S.mode === 'tag' && S.tagCur && showTag(S.tagCur))
+        .catch(() => {});
     } else if (n.t === 'run') {
-      if (n.thread_id === S.cur) loadRuns();
+      if (n.thread_id === S.cur) runsSoon();
       queueLive();
       refreshRunsPage();
     } else if (n.t === 'thread') {
@@ -2614,6 +3306,9 @@ async function reloadMessages() {
   S.messages = [];
   S.seen = new Set();
   S.cursor = 0;
+  S.hasOlder = false;
+  S.olderLoading = null;
+  runLineSig = new WeakMap();
   $('messages').replaceChildren();
   await fetchNew();
 }
@@ -2699,6 +3394,7 @@ async function boot() {
   S.tab = ['runs', 'sessions', 'people', ...(dlgOn ? ['claims'] : [])].includes(store('bs.aux-tab')) ? store('bs.aux-tab') : 'runs';
   setAux(!auxOverlays() && store('bs.aux-open') === '1', S.tab);
   await loadThreads();
+  loadTags().catch(() => {});
   queueLive();
   loadAgents();
   connectWs();
@@ -2717,9 +3413,7 @@ function applyPrefill(q) {
   const title = q.get('new');
   if (title != null && S.mode === 'convo' && S.detail) {
     S.pendingCompose = { text, to };
-    openFork();
-    $('fork-title').value = title.slice(0, 200);
-    syncForkNext();
+    openFork(undefined, { title: title.slice(0, 200) }); // 옛 글을 받느라 늦게 열릴 수 있어 제목은 창이 열릴 때 넣는다
     return;
   }
   fillCompose(text, to);
@@ -2752,7 +3446,10 @@ function mountLangSelect() {
     location.reload();
   });
   const box = el('label', { class: 'menu-lang' }, el('span', { class: 'mi-label' }, t('app.language')), sel);
-  menu.insertBefore(box, menu.querySelector('.menu-logout'));
+  // 사이드바 맨 아래(#1740 · Claude 의 계정 자리처럼) — 없으면 옛 자리(메뉴 끝 로그아웃 위)
+  const foot = $('nav-foot');
+  if (foot) foot.append(box);
+  else menu.insertBefore(box, menu.querySelector('.menu-logout'));
 }
 mountLangSelect();
 boot();
@@ -2869,3 +3566,217 @@ async function loadLive() {
   S.live = m;
   renderList();
 }
+
+// ───── # 태그 자동완성(마스터 #1523 «클로드 코드의 슬래시 명령처럼»): 글쓰기 칸에서 # 을 치면 등록된 태그를 찾아 고른다 ─────
+// 등록된(보관 아닌) 태그만 · 앞머리 맞춤 먼저, 그다음 포함 맞춤 · 같은 무리 안에서는 최근 부른 순 · ↑↓ 고르기 · Enter/Tab 넣기 · Esc 닫기.
+// «#숫자»는 글 번호라 안 띄운다. 마스터는 맞는 태그가 없으면 그 자리에서 새 태그로 만들 수 있다.
+function tagSuggest(ta) {
+  if (!ta) return;
+  const box = el('div', { class: 'tag-suggest', role: 'listbox', 'aria-label': t('app.tag_suggest_label'), hidden: true });
+  document.body.append(box);
+  let st = null; // { start, end, q, opts:[{tag}|{create}], i }
+  const close = () => {
+    st = null;
+    box.hidden = true;
+    ta.removeAttribute('aria-activedescendant');
+  };
+  const query = () => {
+    const pos = ta.selectionStart;
+    if (pos !== ta.selectionEnd) return null;
+    const m = ta.value.slice(0, pos).match(/(?:^|[^\p{L}\p{N}_/&])#([\p{L}\p{N}_-]{0,40})$/u);
+    if (!m || (m[1] && /^\p{N}+$/u.test(m[1]))) return null;
+    return { start: pos - m[1].length - 1, end: pos, q: m[1] };
+  };
+  const recent = (a, b) => (b.last_called_at ?? 0) - (a.last_called_at ?? 0) || a.name.localeCompare(b.name);
+  const paint = () => {
+    box.replaceChildren(
+      ...st.opts.map((o, i) => {
+        const sel = i === st.i;
+        const row = o.tag
+          ? el('div', { class: `opt${sel ? ' sel' : ''}`, role: 'option', id: `tgs-${i}`, 'aria-selected': String(sel) }, el('span', {}, `#${o.tag.name}`), el('span', { class: 'faint' }, t(`app.tag_band_${tagBand(o.tag)}`)))
+          : o.create
+            ? el('div', { class: `opt${sel ? ' sel' : ''}`, role: 'option', id: `tgs-${i}`, 'aria-selected': String(sel) }, el('span', {}, t('app.tag_suggest_create', { name: o.create })))
+            : el('div', { class: 'opt empty faint' }, o.empty);
+        if (o.tag || o.create) {
+          row.addEventListener('mousedown', (e) => e.preventDefault()); // 칸의 포커스를 지킨다
+          row.addEventListener('click', () => pick(i));
+        }
+        return row;
+      }),
+    );
+    if (st.opts[st.i]?.tag || st.opts[st.i]?.create) ta.setAttribute('aria-activedescendant', `tgs-${st.i}`);
+    const r = ta.getBoundingClientRect();
+    box.style.left = `${Math.round(r.left)}px`;
+    box.style.bottom = `${Math.round(window.innerHeight - r.top + 4)}px`;
+    box.style.width = `${Math.round(Math.min(Math.max(r.width, 220), 340))}px`;
+    box.hidden = false;
+  };
+  const refresh = () => {
+    const q = query();
+    if (!q) return close();
+    const ql = q.q.toLowerCase();
+    const live = (S.tags ?? []).filter((x) => !x.archived_at);
+    const pref = live.filter((x) => x.name.toLowerCase().startsWith(ql)).sort(recent);
+    const sub = live.filter((x) => !pref.includes(x) && x.name.toLowerCase().includes(ql)).sort(recent);
+    const opts = [...pref, ...sub].slice(0, 8).map((tag) => ({ tag }));
+    if (S.me?.is_master && q.q && !live.some((x) => x.name === q.q) && !(S.tags ?? []).some((x) => x.name === q.q)) opts.push({ create: q.q });
+    if (!opts.length) opts.push({ empty: q.q ? t('app.tag_suggest_none', { name: q.q }) : t('app.tag_suggest_empty') });
+    const keep = st && st.start === q.start ? Math.min(st.i, opts.length - 1) : 0;
+    st = { ...q, opts, i: keep };
+    paint();
+  };
+  const insert = (name) => {
+    const v = ta.value;
+    const after = v.slice(st.end);
+    const add = `#${name}${/^\s/.test(after) ? '' : ' '}`;
+    ta.value = v.slice(0, st.start) + add + after;
+    const c = st.start + add.length;
+    ta.setSelectionRange(c, c);
+    close();
+    ta.dispatchEvent(new Event('input', { bubbles: true }));
+    ta.focus();
+  };
+  async function pick(i) {
+    const o = st?.opts[i];
+    if (!o) return;
+    if (o.tag) return insert(o.tag.name);
+    if (!o.create) return;
+    const keepSt = st;
+    try {
+      await api('POST', '/api/tags', { name: o.create });
+      await loadTags();
+      st = keepSt;
+      insert(o.create);
+    } catch (e) {
+      notify(t('app.failed_title'), e.message);
+    }
+  }
+  // 캡처 단계에 건다 — 같은 칸의 «Enter = 보내기» 듣개보다 먼저 받아야 목록이 열린 동안 Enter 가 글을 안 보낸다
+  ta.addEventListener(
+    'keydown',
+    (e) => {
+      if (!st || box.hidden || e.isComposing || e.keyCode === 229) return;
+      const pickable = st.opts.some((o) => o.tag || o.create);
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        if (!pickable) return;
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        const n = st.opts.length;
+        st.i = (st.i + (e.key === 'ArrowDown' ? 1 : n - 1)) % n;
+        paint();
+      } else if ((e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey) || e.key === 'Tab') {
+        if (!pickable) return;
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        pick(st.i);
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        close();
+      }
+    },
+    true,
+  );
+  ta.addEventListener('input', refresh);
+  ta.addEventListener('click', refresh);
+  ta.addEventListener('keyup', (e) => {
+    if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) refresh();
+  });
+  ta.addEventListener('blur', () => setTimeout(close, 120));
+  window.addEventListener('resize', () => st && paint());
+}
+tagSuggest($('body'));
+tagSuggest($('tg-body'));
+
+// ───── 태그 고르개(마스터 #1529 «수신 대상 위에 태그 리스트 · 바로 선택»): 등록된 태그를 칩으로 늘어놓고 누르면 글 첫 줄 태그 줄에 넣고 뺀다 ─────
+// 주 태그는 사용자 글의 첫 줄 «#A #B»만의 줄이다(src/tags.ts · ≤2). 칩은 그 줄을 읽어 켜짐을 보이고, 누르면 그 줄만 고친다 — 본문은 안 건드린다.
+const TAG_LINE_RE = /^\s*(?:#[\p{L}\p{N}_-]{1,40}\s*)+$/u;
+function headTagLine(v) {
+  const lines = v.split('\n');
+  const idx = lines.findIndex((l) => l.trim() !== '');
+  const names = idx >= 0 && TAG_LINE_RE.test(lines[idx]) ? [...lines[idx].matchAll(/#([\p{L}\p{N}_-]{1,40})/gu)].map((m) => m[1]) : null;
+  return { lines, idx: names ? idx : -1, names: names ?? [] };
+}
+// 개수 제한 없음(v0.34.0 · 마스터 #1674) — 누른 순서가 곧 메인·서브·참조 순서
+function toggleHeadTag(v, name) {
+  const h = headTagLine(v);
+  let names = h.names;
+  if (names.includes(name)) names = names.filter((n) => n !== name);
+  else names = [...names, name];
+  const line = names.map((n) => `#${n}`).join(' ');
+  const lines = [...h.lines];
+  if (h.idx >= 0) {
+    if (line) lines[h.idx] = line;
+    else lines.splice(h.idx, 1);
+  } else if (line) lines.unshift(line);
+  return lines.join('\n').replace(/^\n+/, '');
+}
+function renderTagPick() {
+  const box = $('tag-pick');
+  if (!box) return;
+  const live = (S.tags ?? []).filter((x) => !x.archived_at).sort((a, b) => (b.last_called_at ?? 0) - (a.last_called_at ?? 0) || a.name.localeCompare(b.name));
+  box.hidden = !live.length;
+  if (!live.length) return box.replaceChildren();
+  const on = new Set(headTagLine($('body').value).names);
+  box.replaceChildren(
+    el('span', { class: 'lbl' }, t('app.tag_pick')),
+    ...live.map((tg) => {
+      const b = el('button', { type: 'button', class: `chip tag-pick-chip${on.has(tg.name) ? ' on' : ''}`, 'aria-pressed': String(on.has(tg.name)), 'data-tag': tg.name, title: tagRecipientLine(tg) }, `#${tg.name}`);
+      b.addEventListener('mousedown', (e) => e.preventDefault());
+      b.addEventListener('click', () => {
+        const ta = $('body');
+        ta.value = toggleHeadTag(ta.value, tg.name);
+        ta.dispatchEvent(new Event('input', { bubbles: true }));
+        ta.focus();
+        ta.setSelectionRange(ta.value.length, ta.value.length);
+      });
+      return b;
+    }),
+  );
+}
+$('body').addEventListener('input', renderTagPick);
+
+// ───── 첫 줄은 태그만(마스터 #1531): 첫 줄이 등록 태그로 시작했고 «#A ␣» 뒤에 글자를 치면 그 앞에 # 을 붙여 다음 태그로 만든다 ─────
+// 까닭: «#A 글…»이 되면 첫 줄이 태그 줄이 아니게 돼(src/tags.ts) 칩을 더 누를 때 #A 가 둘째 줄로 밀려 인라인이 됐다.
+// 첫 줄에 태그가 없으면 아무것도 안 한다. 본문은 Shift+Enter 로 줄을 바꿔 쓴다. 한글 조합은 조합이 시작될 때 # 을 먼저 넣는다.
+function headTagLead(v, pos) {
+  const nl = v.indexOf('\n');
+  const end = nl < 0 ? v.length : nl;
+  if (pos > end || v.slice(pos, end).trim() !== '') return false;
+  const m = v.slice(0, pos).match(/^\s*((?:#[\p{L}\p{N}_-]{1,40}\s+)+)$/u);
+  if (!m) return false;
+  const known = new Set((S.tags ?? []).filter((x) => !x.archived_at).map((x) => x.name));
+  // «#1537 #A ␣»처럼 글 번호를 같이 적은 줄도 태그 줄이다(마스터 #1539 · 서버도 #숫자는 건너뛰고 줄은 태그 줄로 본다) — 글 번호는 빼고 나머지가 모두 등록 태그이고 하나 이상일 때만
+  const names = [...m[1].matchAll(/#([\p{L}\p{N}_-]{1,40})/gu)].map((x) => x[1]).filter((n) => !/^\p{N}+$/u.test(n));
+  return names.length > 0 && names.every((n) => known.has(n));
+}
+function forceHeadTags(ta) {
+  const at = () => (ta.selectionStart === ta.selectionEnd ? ta.selectionStart : -1);
+  const put = (pos, txt) => {
+    ta.setRangeText(txt, pos, pos, 'end');
+  };
+  ta.addEventListener('beforeinput', (e) => {
+    if (e.inputType !== 'insertText' || !e.data || /^[\s#]/.test(e.data) || !e.cancelable) return;
+    const pos = at();
+    if (pos < 0 || !headTagLead(ta.value, pos)) return;
+    e.preventDefault();
+    put(pos, `#${e.data}`);
+    ta.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  ta.addEventListener('compositionstart', () => {
+    const pos = at();
+    if (pos >= 0 && headTagLead(ta.value, pos)) put(pos, '#');
+  });
+  // 받침: beforeinput 을 못 막은 경우(옛 브라우저 등) — 방금 친 한 글자가 «#A ␣» 바로 뒤면 그 앞에 # 을 끼운다
+  ta.addEventListener('input', (e) => {
+    if (e.isComposing || (e.inputType && e.inputType !== 'insertText')) return;
+    const pos = at();
+    if (pos < 1 || /[\s#]/.test(ta.value[pos - 1])) return;
+    if (!headTagLead(ta.value.slice(0, pos - 1) + ta.value.slice(pos), pos - 1)) return;
+    put(pos - 1, '#');
+    ta.setSelectionRange(pos + 1, pos + 1);
+    ta.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+}
+forceHeadTags($('body'));
+

@@ -490,6 +490,38 @@ const MIGRATIONS: Migration[] = [
   `
   ALTER TABLE deliveries ADD COLUMN forward_note TEXT;
   `,
+  // 19 — 태그 보기 1단계(2026-11-03 마스터 #1471~#1481 · docs/태그-보기-사양-2026-11-03.md): 루트 하나에 글이 쌓이고 #태그로 거른 보기에서 이어 간다.
+  //     tags = 등록부(마스터만 만든다 · owner_id NULL = 대표 에이전트를 따름 · archived_at = 읽기 전용 보관) ·
+  //     message_tags = 글에 붙은 태그(role primary ≤2 — 첫 줄/끝줄 · inline — 본문 속). 글 본문은 그대로 두고 태그는 여기서 센다.
+  //     기존 표·행은 그대로. 대표 에이전트는 meta 'default_agent'.
+  `
+  CREATE TABLE tags (
+    id          TEXT PRIMARY KEY,
+    name        TEXT NOT NULL,
+    owner_id    TEXT REFERENCES participants(id),
+    created_by  TEXT NOT NULL REFERENCES participants(id),
+    created_at  INTEGER NOT NULL,
+    updated_at  INTEGER NOT NULL,
+    archived_at INTEGER
+  );
+  CREATE UNIQUE INDEX tags_name ON tags(name);
+  CREATE TABLE message_tags (
+    message_seq INTEGER NOT NULL REFERENCES messages(seq),
+    tag_id      TEXT NOT NULL REFERENCES tags(id),
+    role        TEXT NOT NULL CHECK (role IN ('primary','inline')),
+    PRIMARY KEY (message_seq, tag_id)
+  );
+  CREATE INDEX message_tags_tag ON message_tags(tag_id, message_seq);
+  `,
+  // 20 태그별 차선(2026-11-05 마스터 #1561·#1563): 세션·«한 번에 하나»를 방 × 에이전트 × 차선 단위로.
+  //     차선 = 원인 글의 첫 주 태그 id(없으면 '' = 기본 차선). 옛 세션·실행은 모두 '' — 그대로 이어진다.
+  //     세대 번호 UNIQUE(thread, agent, generation)는 표 제약이라 그대로 두고, 새 세대는 차선과 상관없이 MAX+1 을 쓴다.
+  `
+  ALTER TABLE agent_sessions ADD COLUMN lane TEXT NOT NULL DEFAULT '';
+  DROP INDEX agent_sessions_one_active;
+  CREATE UNIQUE INDEX agent_sessions_one_active ON agent_sessions(thread_id, agent_id, lane) WHERE status = 'active';
+  ALTER TABLE runs ADD COLUMN lane TEXT NOT NULL DEFAULT '';
+  `,
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.length;

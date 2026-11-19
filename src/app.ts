@@ -246,8 +246,30 @@ export async function buildApp(cfg: Config, opts: { logger?: boolean; registry?:
   // 언어(마스터만 · #823): 화면 언어를 고르면 서버 언어도 같이 — 에이전트 규약·서버 안내가 따른다
   fastify.put<{ Body: { lang?: unknown } }>('/api/settings/lang', { preHandler: auth }, async (req) => store.setLang(req.principal!, req.body?.lang));
   fastify.get('/api/participants', { preHandler: auth }, async () => ({ participants: store.listParticipants(true) }));
+  // 태그 등록부(마이그레이션 19 · 마스터 #1475·#1481): 목록은 누구나 · 만들기·고치기(이름·담당자·보관)는 마스터만 · 대표 에이전트 설정
+  fastify.get<{ Querystring: { archived?: string } }>('/api/tags', { preHandler: auth }, async (req) => ({
+    tags: store.tags.list(req.query?.archived === '1'),
+    default_agent: store.tags.defaultAgent(),
+  }));
+  fastify.post<{ Body: { name?: unknown; owner_id?: unknown } }>('/api/tags', { preHandler: auth }, async (req, reply) =>
+    reply.code(201).send({ tag: store.tags.create(req.principal!, req.body ?? {}) }),
+  );
+  fastify.patch<{ Params: { id: string }; Body: { name?: unknown; owner_id?: unknown; archived?: unknown } }>('/api/tags/:id', { preHandler: auth }, async (req) => ({
+    tag: store.tags.update(req.principal!, req.params.id, req.body ?? {}),
+  }));
+  // 태그 보기(사양 2.2): 이 태그가 든 글만 — 읽을 수 있는 스레드의 것 · 커서는 메시지 목록과 같은 꼴
+  fastify.get<{ Params: { id: string }; Querystring: { after?: string; limit?: string } }>('/api/tags/:id/messages', { preHandler: auth }, async (req) =>
+    store.tags.view(req.principal!, req.params.id, Number(req.query?.after ?? 0) || 0, Number(req.query?.limit ?? 200) || 200),
+  );
+  fastify.put<{ Body: { default_agent?: unknown } }>('/api/settings/default-agent', { preHandler: auth }, async (req) =>
+    store.tags.setDefaultAgent(req.principal!, req.body?.default_agent ?? null),
+  );
   // 에이전트 연결 상태(마스터만) — 이름·마지막 접속·토큰 개수만. 토큰 값·해시는 내지 않는다
   fastify.get('/api/agents', { preHandler: auth }, async (req) => ({ agents: store.listAgents(req.principal!) }));
+  // 에이전트별 모델(마스터만 · 2026-11-04) — { model: "opus" | null } · 다음 호출부터 claim.model 로 어댑터에 실린다
+  fastify.put<{ Params: { id: string }; Body: { model?: unknown } }>('/api/agents/:id/model', { preHandler: auth }, async (req) =>
+    store.setAgentModel(req.principal!, req.params.id, req.body?.model ?? null),
+  );
   // ── 에이전트 연결(기획서 2.1 → «에이전트 연결 상태», 마스터 결정 1·2) · 감사 기록(정책 9) ──
   // 토큰 발급은 화면에 없다(CT 안 CLI → 600 파일). 화면은 조회·폐기만
   fastify.get('/api/connections', { preHandler: auth }, async (req) => store.listConnections(req.principal!));
@@ -271,9 +293,20 @@ export async function buildApp(cfg: Config, opts: { logger?: boolean; registry?:
     const r = store.forkThread(req.principal!, req.params.id, (req.body ?? {}) as any);
     return reply.code(r.duplicate ? 200 : 201).send(r);
   });
-  fastify.get<P & { Querystring: { after?: string; limit?: string } }>('/api/threads/:id/messages', { preHandler: auth }, async (req) =>
-    store.listMessages(req.principal!, req.params.id, Number(req.query.after ?? 0) || 0, Number(req.query.limit ?? 200) || 200),
-  );
+  // 글 번호로 찾기(마스터 #1537): 본문의 «#1533» 링크가 그 글의 대화를 묻는다
+  fastify.get<{ Params: { seq: string } }>('/api/messages/:seq', { preHandler: auth }, async (req) => store.locateMessage(req.principal!, req.params.seq));
+  // ?after=N — 커서 뒤로(기본) · ?tail=1 — 맨 끝 limit 개 · ?before=N — N 보다 옛 글 limit 개(위로 굴릴 때 · 마스터 #1732). 셋 다 글은 seq 오름차순
+  fastify.get<P & { Querystring: { after?: string; limit?: string; before?: string; tail?: string } }>('/api/threads/:id/messages', { preHandler: auth }, async (req) => {
+    const q = req.query;
+    const limit = Number(q.limit ?? 200) || 200;
+    if (q.before !== undefined) {
+      const b = Number(q.before);
+      if (!Number.isInteger(b) || b < 1) throw new ApiError(400, 'bad_request', 'before must be a positive integer');
+      return store.listMessages(req.principal!, req.params.id, 0, limit, { before: b });
+    }
+    if (q.tail === '1') return store.listMessages(req.principal!, req.params.id, 0, limit, { before: null });
+    return store.listMessages(req.principal!, req.params.id, Number(q.after ?? 0) || 0, limit);
+  });
   fastify.get<P>('/api/threads/:id/context', { preHandler: auth }, async (req) => ({
     messages: store.getContext(req.principal!, req.params.id),
   }));

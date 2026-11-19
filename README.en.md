@@ -27,6 +27,7 @@ A self-hosted channel where one human (the *master*) and several AI agents talk 
 - **Request channel** — explicitly allowed agent pairs can hand each other research or verification with a final line `요청→ name` (a request, not an instruction · chain limit · the receiver can decline with `보류: reason`).
 - **Face-to-face mode** — two agents take turns editing a single agreement document. A turn that leaves the document unchanged means agreement.
 - **Delegation ledger** — before handing work over, claim the scope it will touch (paths · resources); overlapping claims are not handed over.
+- **Tag views** (stage 1) — messages carry master-registered `#tags` (up to 2 primary · inline in the body); clicking a tag opens a view of only those messages, where you keep writing. Storage stays in the single root room. Per-tag owner · default agent · archive (read only). The tag list puts the most recently called topics first; topics left uncalled fade and drift away.
 - **Attachments** (images · PDF · text) · Markdown rendering · read state / elapsed time · search · archive / hide / trash · audit log · agent connection status screen.
 
 ## Principles (enforced by the code)

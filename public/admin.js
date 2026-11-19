@@ -45,6 +45,7 @@ const AUDIT_ACTION = {
   'audit.view': t('admin.action.audit.view'),
   'connections.view': t('admin.action.connections.view'),
   'agents.view': t('admin.action.agents.view'),
+  'agents.model': t('admin.action.agents.model'),
   'attachment.add': t('admin.action.attachment.add'),
   'attachment.read': t('admin.action.attachment.read'),
   'adapter.claim': t('admin.action.adapter.claim'),
@@ -510,6 +511,7 @@ function renderConnections() {
         kvList(
           [t('admin.main_room'), a.room_member ? t('admin.member') : el('span', { class: 'alertish' }, t('admin.not_member_left'))],
           [t('admin.readable_threads'), t('admin.n_threads', { n: a.threads })],
+          [t('admin.model'), modelField(a)],
           [t('admin.runs'), a.runs.last_at ? t('admin.runs_summary', { active: a.runs.active, ago: rel(a.runs.last_at), state: a.runs.last_state ? `(${STATE[a.runs.last_state] ?? a.runs.last_state})` : '' }) : t('admin.runs_none')],
           [
             t('admin.last_denied'),
@@ -546,6 +548,40 @@ function renderConnections() {
           : el('p', { class: 'muted small' }, t('admin.no_tokens')),
       );
     }),
+  );
+}
+/** 모델 칸(2026-11-04) — 마스터가 정한 값 · 비우면 어댑터 기본값 · 다음 호출부터. 런타임별 추천은 datalist */
+const MODEL_HINTS = { 'claude-cli': ['opus', 'sonnet', 'haiku', 'fable'] };
+function modelField(a) {
+  const rt = a.last_model?.runtime ?? null;
+  const listId = `ag-models-${a.id}`;
+  const input = el('input', { type: 'text', class: 'ag-model-input', value: a.model ?? '', placeholder: t('admin.model_default'), list: listId, 'aria-label': t('admin.model_for', { name: a.name }), maxlength: '100', size: '18' });
+  const save = async () => {
+    const v = input.value.trim();
+    if (v === (a.model ?? '')) return;
+    try {
+      const r = await api('PUT', `/api/agents/${encodeURIComponent(a.id)}/model`, { model: v || null });
+      announce(r.model ? t('admin.model_set', { name: a.name, model: r.model }) : t('admin.model_cleared', { name: a.name }));
+    } catch (e) {
+      await notify(t('admin.model_failed'), e.message);
+    }
+    await loadConnections();
+  };
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') save();
+  });
+  const hints = MODEL_HINTS[rt] ?? [];
+  const actual = a.last_model?.model ? t('admin.model_actual', { model: a.last_model.model, runtime: rt ?? '?' }) : t('admin.model_actual_none');
+  const unsupported = rt && /^openclaw/.test(rt);
+  return el(
+    'span',
+    { class: 'ag-model' },
+    input,
+    el('datalist', { id: listId }, ...hints.map((h) => el('option', { value: h }))),
+    ' ',
+    el('button', { type: 'button', class: 'small-btn', onclick: save }, t('admin.model_save')),
+    el('div', { class: 'faint small' }, actual),
+    unsupported ? el('div', { class: 'alertish small' }, t('admin.model_unsupported', { runtime: rt })) : null,
   );
 }
 async function revokeAsk(a, c) {

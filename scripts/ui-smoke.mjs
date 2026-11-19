@@ -344,9 +344,12 @@ ok(!msgs().some((m) => m.textContent.includes('스레드 안의 글')), '스레�
 await until(() => $('sr').textContent.includes('메인 채팅방') && $('sr').textContent.includes('작성 대상'), 3000, 'sr announce');
 ok(true, '대화 전환을 화면 읽기 도구에 알림');
 // 메시지 «여기서 분기» → 그 메시지가 기본 분기 시점
+// 방은 최근 100개만 그린다(마스터 #1732) — 화면 맨 위 글(가장 옛 글이 아닐 수 있다)을 누른다
+const clickedSeq = Number(msgs()[0].id.slice(1));
 msgs()[0].querySelector('.actions button:last-child').click();
 await until(() => !$('fork-modal').hidden);
-ok($('fork-points').querySelector(`input[value="${firstSeq}"]`).checked, '«여기서 분기» → 그 메시지가 분기 시점');
+ok($('fork-points').querySelector(`input[value="${clickedSeq}"]`).checked, '«여기서 분기» → 그 메시지가 분기 시점');
+if (w.__S.hasOlder) ok(!!$('fork-points').querySelector(`input[value="${firstSeq}"]`) && !msgs().some((m) => m.id === `m${firstSeq}`), '분기 후보에 화면에 안 불러온 옛 글도 있음(#1732)');
 $('fork-cancel').click();
 ok($('fork-modal').hidden, '취소로 닫힘');
 
@@ -512,10 +515,55 @@ ok((await B('/api/me')).status === 200, 'BETA 토큰 살아 있음(준비)');
 w.document.querySelector('.menu-item[data-menu="agents"]').click();
 await until(() => !$('agents-page').hidden && !!agCard('alpha') && !!agCard('beta'), 5000, 'agents page');
 ok($('app-view').classList.contains('mode-page') && w.document.querySelector('.menu-item.active').dataset.menu === 'agents', '메뉴 «에이전트 연결» → 연결 화면(메뉴 강조)');
+// 한 사이드바(마스터 #1740 · Claude WebUI 꼴): #nav 안에 메뉴(위) · 대화 목록(아래) · 언어(맨 아래) — 페이지 화면에서도 목록은 그대로 DOM·CSS 에 남는다
+{
+  const nav = $('nav');
+  const kids = [...nav.children].map((x) => x.id);
+  ok(kids.join() === 'menu,sidebar,nav-foot', `#nav = 메뉴 · 대화 목록 · 바닥 (${kids})`);
+  ok($('app-view').firstElementChild === nav && $('menu-btn').getAttribute('aria-controls') === 'nav' && $('rail-btn').getAttribute('aria-controls') === 'nav', '격자 첫 칸이 #nav · ☰·접기 단추가 #nav 를 가리킴');
+  ok(!$('lang-select') || $('nav-foot').contains($('lang-select')), '언어 고르기는 사이드바 맨 아래(#nav-foot)');
+  const css = fs.readFileSync(new URL('../public/style.css', import.meta.url), 'utf8');
+  ok(!/\.mode-page #sidebar[^{]*\{[^}]*display:\s*none/.test(css) && /\.work\.mode-page[^{]*\{[^}]*"nav page"/.test(css), '페이지 화면 격자 «nav page» — 대화 목록을 숨기지 않음');
+  ok(/body\.rail-collapsed #sidebar\s*\{\s*display:\s*none/.test(css), '접으면(rail-collapsed) 대화 목록 숨김');
+  ok(!!$('thread-list').querySelector('.conv-item') && $('app-view').classList.contains('mode-page'), '페이지 화면에서도 스레드 목록이 그려져 있음');
+  // 목록에서 대화를 누르면 대화 화면으로(주소 #스레드)
+  const a = $('room-list').querySelector('.conv-item');
+  w.location.hash = a.getAttribute('href').slice(1);
+  await until(() => w.__S.mode === 'convo' && !$('app-view').classList.contains('mode-page'), 5000, 'list → convo');
+  ok($('t-title').textContent === '메인 채팅방', '페이지 화면의 목록 → 대화 화면');
+  // 접기: 기억 · 목록 숨김 클래스
+  const was = w.document.body.classList.contains('rail-collapsed');
+  $('rail-btn').click();
+  ok(w.document.body.classList.contains('rail-collapsed') !== was && w.localStorage.getItem('bs.rail') === (was ? 'open' : 'collapsed'), '접기 단추 → rail-collapsed 토글 · 이 브라우저에 기억');
+  $('rail-btn').click();
+  // ≤999(서랍 폭): 펼친 서랍에서 메뉴를 고르면 서랍이 닫힌다(761–999 도 · #1740)
+  w.matchMedia = (q) => ({ matches: /max-width: (999|1279)px/.test(q), addEventListener() {} });
+  $('menu-btn').click();
+  ok(w.document.body.classList.contains('show-sidebar') && $('menu-btn').getAttribute('aria-expanded') === 'true' && !$('backdrop').hidden, '761–999: ☰ → 메뉴 + 목록 서랍(바깥 막)');
+  w.document.querySelector('.menu-item[data-menu="agents"]').click();
+  await until(() => !$('agents-page').hidden, 5000, 'agents page again');
+  ok(!w.document.body.classList.contains('show-sidebar') && $('backdrop').hidden, '761–999: 서랍에서 메뉴를 고르면 서랍이 닫힘');
+  w.matchMedia = realMM;
+}
 ok(agCard('alpha').querySelector('.pill').textContent === '연결됨' && agCard('alpha').textContent.includes('초 전'), 'ALPHA «연결됨 — 마지막 접속 N초 전»');
 ok(agCard('alpha').textContent.includes('test') && agCard('alpha').querySelector('.badge.cr-active')?.textContent === '유효', '자격 증명 줄: 라벨·상태 «유효»');
 ok($('agents-page').textContent.includes('토큰 발급은 이 화면에 없습니다') && !$$('#agents-page button').some((b) => b.textContent.includes('발급')), '발급 버튼 없음 — CT 안 CLI 안내(마스터 결정 2)');
 ok(!$('agents-page').textContent.includes(ctx.tokens.alpha.token) && !$('agents-page').textContent.includes(ctx.tokens.beta.token), '연결 화면에 토큰 값 없음');
+// 모델 칸(2026-11-04): 비어 있으면 «어댑터 기본값» · 입력 + 저장 → 서버에 저장 · 카드 다시 그림
+{
+  const inp = agCard('alpha').querySelector('.ag-model-input');
+  ok(!!inp && inp.value === '' && inp.placeholder === '어댑터 기본값', '모델 칸: 비어 있음 = 어댑터 기본값');
+  inp.value = 'sonnet';
+  agCard('alpha').querySelector('.ag-model button').click();
+  await until(() => { const n = agCard('alpha')?.querySelector('.ag-model-input'); return n && n !== inp && n.value === 'sonnet'; }, 4000, 'model saved');
+  const conn = await (await fetch(base + '/api/connections', { headers: { Cookie: ctx.cookie } })).json();
+  ok(conn.agents.find((a) => a.id === 'alpha').model === 'sonnet', '모델 저장 → 서버 값 sonnet');
+  const inp2 = agCard('alpha').querySelector('.ag-model-input');
+  inp2.value = '';
+  agCard('alpha').querySelector('.ag-model button').click();
+  await until(() => agCard('alpha')?.querySelector('.ag-model-input')?.value === '' && agCard('alpha').querySelector('.ag-model-input') !== inp2, 4000, 'model cleared');
+  ok(true, '비우고 저장 → 기본값으로');
+}
 // [폐기] → 확인 → 폐기됨
 agCard('beta').querySelector('button.danger').click();
 await until(() => !$('confirm').hidden);
@@ -989,13 +1037,102 @@ const kd = (o) => $('body').dispatchEvent(new w.KeyboardEvent('keydown', { key: 
 $('body').value = '줄바꿈만';
 ok(kd({ shiftKey: true }) === true && msgs().length === 0, 'Shift+Enter 는 보내지 않음(줄바꿈)');
 ok(kd({ isComposing: true }) === true && msgs().length === 0, '한글 조합 중 Enter 는 보내지 않음');
+{
+  // 터치 키보드(마스터 #1618): Enter = 줄바꿈 · 키 모양 «↵» · 안내문도 바뀜 — 보내기는 단추로만
+  const mm = w.matchMedia;
+  w.matchMedia = (q) => ({ matches: /hover: none/.test(q), addEventListener() {} });
+  w.__syncEnterMode();
+  ok($('body').getAttribute('enterkeyhint') === 'enter' && $('body').placeholder.includes('Enter 줄바꿈'), '터치: enterkeyhint=enter · 안내 «Enter 줄바꿈»');
+  ok(kd({}) === true && msgs().length === 0, '터치: Enter 는 보내지 않음(줄바꿈)');
+  w.matchMedia = mm;
+  w.__syncEnterMode();
+  ok($('body').getAttribute('enterkeyhint') === 'send' && $('body').placeholder.includes('Enter 전송'), '데스크톱: enterkeyhint=send · 안내 «Enter 전송»');
+}
 $('body').value = '엔터로 보냄';
 ok(kd({}) === false, 'Enter → 보내기(기본 동작 막음)');
 await until(() => msgs().length === 1 && msgs()[0].textContent.includes('엔터로 보냄'), 5000, 'enter send');
+ok(!memoBox().checked, '«메모»는 한 번만 — 보낸 뒤 꺼짐(마스터 #1535)');
+pick('recipients', '*memo');
 $('body').value = '컨트롤 엔터로 보냄';
 kd({ ctrlKey: true });
 await until(() => msgs().length === 2, 5000, 'ctrl enter send');
 ok(true, 'Ctrl+Enter → 보내기');
+// ── 수신 기본값 = 직전 대화 상대(마스터 #1535): 다시 열면 내가 마지막으로 보낸 글의 수신자 · 메모 뒤에도 그쪽으로 돌아옴
+await M('POST', `/api/threads/${ET}/messages`, { client_key: 'last-to-beta', body: '베타에게', recipients: ['beta'] });
+await until(() => msgs().length === 3, 5000, 'beta msg');
+await w.__openThread(ET);
+await until(() => $$('#recipients input[data-agent]:checked').length === 1, 5000, 'default rcpt');
+ok($('recipients').querySelector('input[value="beta"]').checked && !$('recipients').querySelector('input[value="alpha"]').checked, '다시 열면 직전에 보낸 상대(beta)가 켜짐');
+pick('recipients', '*memo');
+$('body').value = '메모 한 줄';
+kd({});
+await until(() => msgs().length === 4, 5000, 'memo send');
+ok(!memoBox().checked && $('recipients').querySelector('input[value="beta"]').checked, '메모를 보낸 뒤 수신이 beta 로 돌아옴');
+// ── 본문 «#글번호» 링크(마스터 #1537): 다른 대화의 글이면 그 대화를 열고 그 글로 간다
+const linkSeq = w.__S.messages[0].seq;
+const LT = (await M('POST', '/api/threads', { title: '링크 시험', members: ['alpha'] })).thread.id;
+await w.__openThread(LT);
+await until(() => $('t-title').textContent === '링크 시험', 5000, 'link thread');
+await M('POST', `/api/threads/${LT}/messages`, { client_key: 'seq-link', body: `앞 글 #${linkSeq} 참고 · 이상한 값 a#12 와 \`#34\``, recipients: [] });
+await until(() => msgs().length === 1, 5000, 'link msg');
+const links = [...msgs()[0].querySelectorAll('a.seq-link')];
+ok(links.length === 1 && links[0].textContent === `#${linkSeq}`, '본문 #글번호만 링크(낱말 속·코드는 안 함)');
+w.history.replaceState(null, '', `#${LT}`); // 시험은 openThread 를 바로 불러 주소가 안 바뀌어 있다 — 실제 화면처럼 주소를 맞춘다
+links[0].dispatchEvent(new w.MouseEvent('click', { bubbles: true, cancelable: true }));
+await until(() => w.__S.cur === ET && !!$(`m${linkSeq}`), 6000, 'jump to other thread');
+ok(true, '누르면 그 글의 대화가 열리고 그 글이 화면에 있음');
+// 뒤로가기(마스터 #1704): 링크를 누른 대화로 돌아오고, 떠나기 전 자리(history.state.bsPos)가 남아 있음
+ok(w.history.state?.bsJump === linkSeq, '링크로 온 기록 칸에 bsJump 가 적힘');
+w.history.back();
+await until(() => w.__S.cur === LT && msgs().length === 1, 6000, 'back to link thread');
+ok(w.history.state?.bsPos?.mode === 'convo', '뒤로가기 → 링크를 누른 대화로 돌아오고 떠난 자리 기록이 있음');
+w.history.forward();
+await until(() => w.__S.cur === ET && !!$(`m${linkSeq}`), 6000, 'forward to target');
+ok(true, '앞으로가기 → 다시 그 글의 대화');
+
+// ── 긴 대화는 최근 100개만 그리고 옛 글은 이어 받는다(마스터 #1732)
+const LG = (await M('POST', '/api/threads', { title: '긴 대화', members: ['alpha'] })).thread.id;
+const lgSeqs = [];
+for (let i = 0; i < 230; i++) lgSeqs.push((await M('POST', `/api/threads/${LG}/messages`, { client_key: `lg-${i}`, body: `긴 글 ${i}`, recipients: [] })).message.seq);
+const sortedUnique = () => w.__S.messages.every((m, i) => i === 0 || w.__S.messages[i - 1].seq < m.seq) && new Set(msgs().map((m) => m.id)).size === msgs().length;
+await w.__openThread(LG);
+await until(() => w.__S.opened === LG, 5000, 'long thread');
+ok(msgs().length === 100 && msgs()[99].id === `m${lgSeqs[229]}` && msgs()[0].id === `m${lgSeqs[130]}`, '긴 대화는 최근 100개만 그림(끝 글까지)');
+ok(w.__S.hasOlder && !!$('older-bar') && $('messages').firstElementChild === $('older-bar') && $('older-bar').textContent.includes('이전 글 더 보기'), '맨 위 «이전 글 더 보기» 줄');
+$('older-bar').querySelector('button').click();
+await until(() => msgs().length === 200 && !w.__S.olderLoading, 5000, 'older page');
+ok(msgs()[0].id === `m${lgSeqs[30]}` && sortedUnique() && $('messages').firstElementChild === $('older-bar'), '누르면 그 앞 100개가 앞에 붙음(순서·중복 없음)');
+$('messages').scrollTop = 0;
+$('messages').dispatchEvent(new w.Event('scroll'));
+await until(() => msgs().length === 230 && !w.__S.olderLoading, 5000, 'older by scroll');
+ok(!w.__S.hasOlder && !$('older-bar') && msgs()[0].id === `m${lgSeqs[0]}` && sortedUnique(), '꼭대기로 굴리면 나머지를 받고 더 없으면 줄이 사라짐');
+// 같은 대화 안 링크 — 안 불러온 옛 글이면 그 글까지 받아 온 뒤 간다
+await w.__openThread(LG);
+await until(() => w.__S.opened === LG && msgs().length === 100, 5000, 'reopen long');
+await M('POST', `/api/threads/${LG}/messages`, { client_key: 'lg-link', body: `처음 글 #${lgSeqs[3]} 보기`, recipients: [] });
+await until(() => msgs().length === 101, 5000, 'lg link msg');
+w.history.replaceState(null, '', `#${LG}`);
+msgs()[100].querySelector('a.seq-link').dispatchEvent(new w.MouseEvent('click', { bubbles: true, cancelable: true }));
+await until(() => !!$(`m${lgSeqs[3]}`), 6000, 'jump to old in same thread');
+ok(w.__S.cur === LG && sortedUnique() && w.history.state?.bsJump === lgSeqs[3], '같은 대화의 안 불러온 옛 글 링크 → 그 글까지 받아 옴(bsJump)');
+// 다른 대화에서 이 대화의 옛 글로
+await w.__openThread(LT);
+await until(() => w.__S.opened === LT, 5000, 'link thread again');
+await M('POST', `/api/threads/${LT}/messages`, { client_key: 'lt-old-link', body: `긴 대화 첫 글 #${lgSeqs[0]}`, recipients: [] });
+await until(() => msgs().some((m) => m.textContent.includes('긴 대화 첫 글')), 5000, 'lt old link');
+w.history.replaceState(null, '', `#${LT}`);
+msgs().at(-1).querySelector('a.seq-link').dispatchEvent(new w.MouseEvent('click', { bubbles: true, cancelable: true }));
+await until(() => w.__S.cur === LG && !!$(`m${lgSeqs[0]}`), 8000, 'jump to old in other thread');
+ok(sortedUnique(), '다른 대화의 안 불러온 옛 글 링크 → 그 대화를 열고 그 글까지 받아 옴');
+// 뒤로가기 자리 되살림 — 떠났던 글(bsPos)이 다시 연 대화의 최근 창 밖이면 그 글까지 받는다
+await w.__openThread(LG);
+await until(() => w.__S.opened === LG && msgs().length === 100, 5000, 'reopen long 2');
+ok(!$(`m${lgSeqs[10]}`), '(다시 열면 옛 글은 안 그려짐)');
+w.history.replaceState({ bsPos: { mode: 'convo', id: `m${lgSeqs[10]}`, off: 0, top: 0 } }, '', `#${LG}`);
+w.history.pushState({ bsJump: lgSeqs[200] }, '', `#${LG}`);
+w.history.back();
+await until(() => !!$(`m${lgSeqs[10]}`), 8000, 'restore old pos');
+ok(sortedUnique(), '뒤로가기 자리(bsPos)가 옛 글이면 그 글까지 받아 되살림');
 
 // ── 세션 크기 표시 · 손 교체 이어받기(마스터 #283 C)
 const ST = (await M('POST', '/api/threads', { title: '세션 크기', members: ['alpha'] })).thread.id;
