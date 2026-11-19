@@ -102,6 +102,7 @@ Check: `curl http://127.0.0.1:8080/healthz` → `{"ok":true,…}`
 | `BRAINSTORM_ALLOW_EXTERNAL` | Must be `1` to listen on non-loopback addresses (off by default) |
 | `BRAINSTORM_ORIGINS` | Origins accepted for cookie-authenticated state-changing requests and WebSocket. **Always add the address you open in the browser (LAN IP · domain)** |
 | `BRAINSTORM_SECURE_COOKIE` | `auto` = Secure only on HTTPS requests |
+| `BRAINSTORM_TRUSTED_PROXIES` | Proxy addresses (IP · CIDR, comma-separated) whose `X-Forwarded-For` · `X-Forwarded-Proto` are trusted. **Only requests from these addresses** are believed — login lockout · audit IP · Secure cookie (`auto`) then follow the real client. Empty = trust nothing (the direct peer address) |
 | `BRAINSTORM_MODULES` | Optional modules to enable (comma list · `all` · empty = core only) — face-to-face `face` · delegations `delegations` · requests `requests` · merge up `merge` (`docs/MODULES.md`) |
 | `BRAINSTORM_FACE_DRAFTER` · `BRAINSTORM_FACE_REVIEWER` | Agent ids for face-to-face mode (drafter · reviewer). Leave empty and face-to-face mode cannot be turned on |
 | Others | Size limits · lease · cancel-confirmation wait · call budget — see comments in `deploy/brainstorm.env` |

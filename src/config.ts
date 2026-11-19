@@ -9,6 +9,11 @@ export interface Config {
   backupsDir: string;
   /** "host:port" 목록. 첫 번째가 주 리스너. */
   listen: { host: string; port: number }[];
+  /**
+   * X-Forwarded-For · X-Forwarded-Proto 를 믿을 프록시 주소(IP · CIDR) — 이 주소에서 온 요청만 그 머리를 믿는다.
+   * 비면 아무것도 안 믿는다(직접 접속 주소가 req.ip). 로그인 잠금 · 감사 IP · Secure 쿠키(auto)가 이것을 따른다
+   */
+  trustedProxies: string[];
   /** 쿠키 인증 요청과 WebSocket이 허용하는 Origin 목록 */
   origins: string[];
   /** 'auto' = 요청이 https일 때만 Secure. 'always' | 'never' */
@@ -113,6 +118,7 @@ export function loadConfig(over: Partial<Config> = {}): Config {
     backupsDir: path.join(dataDir, 'backups'),
     listen,
     origins,
+    trustedProxies: (process.env.BRAINSTORM_TRUSTED_PROXIES ?? '').split(',').map((x) => x.trim()).filter(Boolean),
     secureCookie: (process.env.BRAINSTORM_SECURE_COOKIE as Config['secureCookie']) ?? 'auto',
     bodyMaxChars: int('BRAINSTORM_BODY_MAX_CHARS', 32_000),
     attachmentMaxBytes: int('BRAINSTORM_ATTACHMENT_MAX_BYTES', 20 * 1024 * 1024),
