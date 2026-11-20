@@ -85,6 +85,8 @@ async function main(): Promise<number> {
     timeoutMs: num(env.CODEX_TIMEOUT_MS, 1_800_000),
     attachDir: path.resolve(env.CODEX_ATTACH_DIR || path.join(os.homedir(), '.cache', 'brainstorm', 'attachments')),
     sessionFile: path.resolve(env.CODEX_SESSION_FILE || path.join(os.homedir(), '.cache', 'brainstorm', 'codex-sessions.json')),
+    // brainStorm MCP(질문함 도구) — 기본 켬 · CODEX_BRAINSTORM_MCP=0 이면 끔
+    mcp: env.CODEX_BRAINSTORM_MCP === '0' ? undefined : { url, token },
   });
   const worker = new BrainstormWorker({
     url,
@@ -93,7 +95,7 @@ async function main(): Promise<number> {
     ocAgentId: 'codex',
     runtime: 'codex-cli',
     describeModel: (meta) => ({ runtime: 'codex-cli', model: meta?.model ?? shownModel ?? null }),
-    configVersion: `codex-cli:${shownModel || 'default'}:${globalArgs.join(' ').slice(0, 80)}:pr${sessionUuid(typeof preamble === 'function' ? preamble() : preamble).slice(0, 8)}`.slice(0, 200),
+    configVersion: `codex-cli:${shownModel || 'default'}:${globalArgs.join(' ').slice(0, 80)}:pr${sessionUuid(typeof preamble === 'function' ? preamble() : preamble).slice(0, 8)}${env.CODEX_BRAINSTORM_MCP === '0' ? '' : ':mcp'}`.slice(0, 200),
     runTurn: runner,
     log,
     pollMs: num(env.BRAINSTORM_POLL_MS, 3000),

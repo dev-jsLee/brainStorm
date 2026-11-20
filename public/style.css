@@ -202,7 +202,7 @@ body.rail-collapsed #rail-btn .i-close { display: none; }
 
 /* ── 대화 영역 ── */
 #convo { grid-area: convo; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
-#thread { display: flex; flex-direction: column; min-height: 0; flex: 1; }
+#thread { display: flex; flex-direction: column; min-height: 0; flex: 1; position: relative; }
 .convo-head { padding: 14px 28px 12px; border-bottom: 1px solid var(--line); display: flex; flex-direction: column; gap: 4px; }
 /* 폭이 모자라면 버튼이 다음 줄로 넘어간다(마스터 #724) — 버튼 하나하나는 제 안에서 줄을 안 바꾼다 · 제목은 남은 폭을 다 쓰되 10em 아래로는 안 줄어 버튼을 밀어낸다 */
 .title-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; min-width: 0; }
@@ -797,6 +797,8 @@ button.linkish { background: none; border: 0; padding: 0; cursor: pointer; text-
 .tag-chip.inline:hover { color: var(--muted); }
 .tag-chip.rank-ref { color: var(--muted); border-color: var(--line); } /* 참조 태그(셋째부터 · 마스터 #1674) — 실선이지만 옅게 */
 #tag-list .conv-item.archived .ttl { color: var(--muted); text-decoration: line-through; }
+#tag-more { display: block; margin: 0 0 2px 12px; font-size: 12px; } /* 태그 목록 열기/접기(마스터 #1879) */
+#tag-more[hidden] { display: none; }
 #tag-list details summary { cursor: pointer; font-size: 12px; color: var(--faint); padding: 6px 12px; }
 .tg-msgs { display: flex; flex-direction: column; gap: 14px; max-width: 980px; }
 .tg-msgs .msg.inherited { opacity: 1; }
@@ -871,3 +873,19 @@ button.linkish { background: none; border: 0; padding: 0; cursor: pointer; text-
 .q-mini { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 8px; padding: 6px 10px; border: 1px dashed var(--accent); border-radius: 4px; font-size: 13px; }
 .q-mini:not(.st-open):not(.st-snoozed) { border-color: var(--line); color: var(--muted); }
 .q-mini button { font-size: 12px; padding: 2px 10px; }
+
+/* 대화 안 질문창(마스터 #1874 · questions.js qDock) — 좁으면 작성란 바로 위 띠, 넓으면(.float) 대화 우상단에 떠 있는 작은 창 */
+.q-dock { margin: 0 28px 8px; padding: 8px 12px 10px; border: 1px solid var(--accent); border-radius: 6px; background: var(--card); display: flex; flex-direction: column; gap: 6px; max-height: 42vh; overflow-y: auto; font-size: 14px; }
+.q-dock.float { position: absolute; right: 24px; width: 360px; max-height: min(50vh, calc(100% - var(--composer-h, 160px) - 120px)); margin: 0; z-index: 5; box-shadow: var(--shadow-lg); }
+.q-dock.folded { overflow: hidden; padding-bottom: 8px; }
+.q-dock.float.folded { width: auto; max-width: 360px; }
+.qd-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 13px; }
+.qd-head .icon-s { min-width: 26px; padding: 0 6px; height: 24px; line-height: 1; font-size: 14px; }
+.qd-body .q-item:first-child { border-top: none; padding-top: 2px; }
+.q-dock .q-opt { padding: 4px 8px; }
+.q-dock .q-desc { font-size: 12px; }
+@media (max-width: 760px) { .q-dock { margin: 0 12px 6px; max-height: 38vh; } }
+.qd-tabs { display: inline-flex; gap: 2px; }
+.qd-tab { font-size: 12px; padding: 1px 8px; height: 22px; }
+.qd-tab[aria-pressed="true"] { border-color: var(--accent); background: var(--active); font-weight: 600; }
+.qd-room { font-size: 12px; max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

@@ -69,17 +69,16 @@ describe('bs-ask 명령', () => {
   });
 });
 
-describe('bs-ask — 질문함이 꺼진 서버', () => {
+describe('bs-ask — 선택 모듈을 안 켠 서버(질문함은 core · 마스터 #1873)', () => {
   let ctx: Ctx;
   before(async () => {
     ctx = await setup({ modules: [] });
   });
   after(async () => ctx.close());
 
-  test('종료 코드 3 · «답에 선택지와 추천을 적어 물을 것»', async () => {
-    const th = await newThread(ctx, '꺼짐', null, ['alpha']);
+  test('그래도 올라간다(종료 코드 0)', async () => {
+    const th = await newThread(ctx, '모듈 없음', null, ['alpha']);
     const r = await run(ctx, 'alpha', ['post', Q], { BRAINSTORM_THREAD_ID: th });
-    assert.equal(r.code, 3, r.err);
-    assert.match(r.err, /질문함 모듈이 꺼져 있음/);
+    assert.equal(r.code, 0, r.err);
   });
 });

@@ -65,7 +65,7 @@ import {
 import { DEFAULT_LANG, dictionaries, languages, normLang, protocolWords, t as tr } from './i18n.js';
 import type { FaceStore } from './modules/face/store.js';
 import type { MergeStore } from './modules/merge/store.js';
-import type { QuestionStore } from './modules/questions/store.js';
+import type { QuestionStore } from './questions/store.js';
 import { TagStore } from './tagstore.js';
 import { parseHold, parseRequest, toHold, type RequestStore } from './modules/requests/store.js';
 import type { DelegationStore } from './modules/delegations/store.js';
@@ -470,7 +470,7 @@ export class Store {
   requests: RequestStore | null = null;
   /** 위임 대장 모듈(src/modules/delegations) */
   delegations: DelegationStore | null = null;
-  /** 질문함 모듈(src/modules/questions) — 꺼지면 질문 경로·claim 칸·글의 질문 머리가 없다 */
+  /** 질문함(src/questions · core — 마스터 #1873) — 앱이 늘 붙인다. 앱 없이 Store 만 쓰는 자리(CLI 등)에서는 비어 있을 수 있다 */
   questions: QuestionStore | null = null;
 
   constructor(
@@ -1783,7 +1783,9 @@ export class Store {
       a.thread_id,
       ...(this.db.prepare('SELECT thread_id FROM thread_context WHERE message_seq = ?').all(a.message_seq) as Row[]).map((r) => r.thread_id),
     ];
-    if (!threads.some((t) => this.canRead(pr.participant.id, t)))
+    // read_all(사서) 은 메시지 읽기와 같게 — 지워지지 않은 스레드의 첨부를 읽기만 한다(2026-11-19 #1861 첨부 → markitdown 본문을 baalda 사본에)
+    const readAllOk = this.readAll(pr) && threads.some((t) => !(this.db.prepare('SELECT deleted_at FROM threads WHERE id = ?').get(t) as Row | undefined)?.deleted_at);
+    if (!readAllOk && !threads.some((t) => this.canRead(pr.participant.id, t)))
       this.deny(pr, new ApiError(404, 'no_attachment'), { action: 'attachment.read', target_type: 'attachment', target_id: id, thread_id: a.thread_id, reason: 'not_member' });
     return { name: a.name, fullPath: path.join(this.cfg.dataDir, a.path), size: a.size, kind: a.kind, mime: a.mime };
   }

@@ -27,7 +27,7 @@ A self-hosted channel where one human (the *master*) and several AI agents talk 
 - **Request channel** — explicitly allowed agent pairs can hand each other research or verification with a final line `요청→ name` (a request, not an instruction · chain limit · the receiver can decline with `보류: reason`).
 - **Face-to-face mode** — two agents take turns editing a single agreement document. A turn that leaves the document unchanged means agreement.
 - **Delegation ledger** — before handing work over, claim the scope it will touch (paths · resources); overlapping claims are not handed over.
-- **Questions inbox** — an agent posts a decision it needs as a questionnaire instead of burying it in its reply (1–4 items · 2–4 options each · the recommendation goes first, marked «(recommended)»). The master picks or types an answer on the «Questions» screen and presses Send · As recommended · Later · Not needed — the answer goes to that conversation as an instruction and calls the agent that asked. If the master answered in chat instead, the agent closes the question itself, recording the message and the answer it read; the master can reopen it if it was misread. Adapters append the room's open questions to the prompt.
+- **Questions inbox** — an agent posts a decision it needs as a questionnaire instead of burying it in its reply (1–4 items · 2–4 options each · the recommendation goes first, marked «(recommended)»). The master picks or types an answer on the «Questions» screen and presses Send · As recommended · Later · Not needed — the answer goes to that conversation as an instruction and calls the agent that asked. If the master answered in chat instead, the agent closes the question itself, recording the message and the answer it read; the master can reopen it if it was misread. Adapters append the room's open questions to the prompt. Agents post through the MCP tools (`ask_question` etc. · «MCP» below) or the `bs-ask` command.
 - **Tag views** (stage 1) — messages carry master-registered `#tags` (up to 2 primary · inline in the body); clicking a tag opens a view of only those messages, where you keep writing. Storage stays in the single root room. Per-tag owner · default agent · archive (read only) · hide (left off the list and picker only) · delete (trash → restore / delete forever). The tag list puts the most recently called topics first; topics left uncalled fade and drift away.
 - **Attachments** (images · PDF · text) · Markdown rendering · read state / elapsed time · search · archive / hide / trash · audit log · agent connection status screen.
 
@@ -143,6 +143,26 @@ then sets pending deliveries to `cancelled` and in-flight runs to `unknown` (old
 Common steps: register a participant on the server, issue a token, and move it to the adapter side as a **mode 600 file** (the adapter refuses to start if group/other permissions are set).
 Every adapter has `check` (identity check only) and `run` (long-running). Exit code 2 = config error, 4 = auth rejected.
 
+### MCP — any agent (`POST /mcp`)
+
+The server opens an MCP endpoint (Streamable HTTP · stateless · JSON responses). Register it in any MCP client with the agent token as `Authorization: Bearer` and the agent can call brainStorm tools — nothing else to install. Humans (cookie) get 403.
+
+| Tool | What it does (module) |
+|---|---|
+| `ask_question` | Post a questionnaire to the Questions inbox (1–4 items · 2–4 options each · `recommended`) — `questions` |
+| `close_question` | Close your own question (answered in chat = `answer` + `by_msg_seq` · superseded · obsolete · per item `item`) — `questions` |
+| `list_questions` | Your questions and their answers (`status` open·closed·all · `thread_id` · `id`) — `questions` |
+
+The tool list follows the enabled modules (empty when the questions module is off). **Which room**: `thread_id` if given; otherwise the server takes the room and the trigger message's primary tags from the run this agent is running now (the run named by the `X-Brainstorm-Run` header, or the only room with a running run) — if it can't tell, the error is `thread_required`.
+The Claude adapter below attaches it every turn on its own. Without an adapter:
+
+```bash
+# Claude Code — the token is stored in ~/.claude.json
+claude mcp add --transport http -s user brainstorm https://brainstorm.example/mcp --header "Authorization: Bearer $(cat ~/.config/brainstorm/agent.token)"
+# Codex — the token is read from an environment variable (set BRAINSTORM_TOKEN where codex starts)
+codex mcp add brainstorm --url https://brainstorm.example/mcp --bearer-token-env-var BRAINSTORM_TOKEN
+```
+
 ### Claude Code (`claude -p`)
 
 `adapter/claude-cli-adapter.ts`. One Claude Code session per thread and generation (`--session-id`/`--resume`) · the prompt carries only unseen messages · the actual model is read from `modelUsage` and recorded.
@@ -162,7 +182,7 @@ install -m 600 ~/claude.token ~/.config/brainstorm/claude.token && rm ~/claude.t
 cp -r dist package.json ~/.local/lib/brainstorm-adapter/
 sed "s#/home/you#$HOME#" deploy/claude-cli/claude.env.example > ~/.config/brainstorm/claude.env   # edit BRAINSTORM_URL if the server is on another machine
 sed "s#/usr/bin/env node#$(command -v node)#" deploy/claude-cli/brainstorm-agent-claude.service > ~/.config/systemd/user/brainstorm-agent-claude.service
-mkdir -p ~/.local/bin && sed "1s#/usr/bin/env node#$(command -v node)#" deploy/claude-cli/bs-ask.mjs > ~/.local/bin/bs-ask && chmod 755 ~/.local/bin/bs-ask   # question-inbox command the agent calls inside a turn (if the server's questions module is off, it asks in the answer instead)
+mkdir -p ~/.local/bin && sed "1s#/usr/bin/env node#$(command -v node)#" deploy/claude-cli/bs-ask.mjs > ~/.local/bin/bs-ask && chmod 755 ~/.local/bin/bs-ask   # (optional) question-inbox command — the fallback when MCP is off (CLAUDE_BRAINSTORM_MCP=0)
 set -a; . ~/.config/brainstorm/claude.env; set +a
 node ~/.local/lib/brainstorm-adapter/dist/adapter/claude-cli-adapter.js check
 systemctl --user daemon-reload
@@ -178,6 +198,7 @@ sed -i "s#^ExecStart=\(/usr/bin/env \)\?[^ ]*node #ExecStart=$(command -v node) 
 systemctl --user daemon-reload && systemctl --user restart brainstorm-agent-claude
 ```
 
+The adapter attaches the question tools every turn — per run it writes a 0600 MCP config (token · run id) under `~/.cache/brainstorm/mcp/`, passes it with `--mcp-config` · `--allowedTools mcp__brainstorm`, and deletes it when the turn ends. Turn it off with `CLAUDE_BRAINSTORM_MCP=0` (location: `CLAUDE_MCP_DIR`).
 Permissions are not hard-coded — use `CLAUDE_EXTRA_ARGS`. Concurrency `BRAINSTORM_CONCURRENCY` (default 3; the server serializes runs within a thread).
 With `CLAUDE_REFS_DIR`, a `#tag` in a message attaches the body of the note with the same name (or front-matter `별칭` alias) to the prompt.
 
@@ -208,6 +229,7 @@ systemctl --user enable --now brainstorm-agent-codex
 
 
 Log in to `codex` as this account first. Permissions via `CODEX_ARGS` (example value `--sandbox read-only --ask-for-approval never`).
+The adapter attaches the question tools every turn — before `exec` it adds `-c mcp_servers.brainstorm.url=…/mcp` · `bearer_token_env_var="BRAINSTORM_MCP_TOKEN"` (the token goes only into the child's environment, never the arguments) · `http_headers={ "X-Brainstorm-Run" = run id }` · `default_tools_approval_mode="approve"` (so the tools aren't blocked under approval policy never). Turn it off with `CODEX_BRAINSTORM_MCP=0`.
 
 ### herdr window (an already-running Claude Code window)
 

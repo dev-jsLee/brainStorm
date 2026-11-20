@@ -76,6 +76,8 @@ async function main(): Promise<number> {
     attachDir: path.resolve(env.CLAUDE_ATTACH_DIR || path.join(os.homedir(), '.cache', 'brainstorm', 'attachments')),
     refs: env.CLAUDE_REFS_DIR ? { dir: path.resolve(env.CLAUDE_REFS_DIR), vaultRoot: env.CLAUDE_REFS_VAULT ? path.resolve(env.CLAUDE_REFS_VAULT) : undefined } : undefined,
     costFile: path.resolve(env.CLAUDE_COST_FILE || path.join(os.homedir(), '.cache', 'brainstorm', 'claude-cost.json')),
+    // brainStorm MCP(질문함 도구) — 기본 켬 · CLAUDE_BRAINSTORM_MCP=0 이면 끔(그때는 bs-ask)
+    mcp: env.CLAUDE_BRAINSTORM_MCP === '0' ? undefined : { url, token, dir: path.resolve(env.CLAUDE_MCP_DIR || path.join(os.homedir(), '.cache', 'brainstorm', 'mcp')) },
   });
   const worker = new BrainstormWorker({
     url,
@@ -84,7 +86,7 @@ async function main(): Promise<number> {
     ocAgentId: 'claude',
     runtime: 'claude-cli',
     describeModel: (meta) => ({ runtime: 'claude-cli', model: meta?.model ?? null }),
-    configVersion: `claude-cli:${env.CLAUDE_MODEL || 'default'}:${extraArgs.join(' ').slice(0, 80)}:ap${sessionUuid(typeof append === 'function' ? append() : append).slice(0, 8)}`.slice(0, 200),
+    configVersion: `claude-cli:${env.CLAUDE_MODEL || 'default'}:${extraArgs.join(' ').slice(0, 80)}:ap${sessionUuid(typeof append === 'function' ? append() : append).slice(0, 8)}${env.CLAUDE_BRAINSTORM_MCP === '0' ? '' : ':mcp'}`.slice(0, 200),
     runTurn: runner,
     log,
     pollMs: num(env.BRAINSTORM_POLL_MS, 3000),

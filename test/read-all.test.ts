@@ -45,6 +45,31 @@ describe('read_all 범위', () => {
     beta.ws.close();
   });
 
+  test('첨부도 읽는다 — 멤버 아닌 스레드의 첨부를 받고, 지운 스레드·read_all 없는 토큰은 404 (#1861 markitdown 사본)', async () => {
+    const up = (await fetch(`${ctx.base}/api/uploads?name=${encodeURIComponent('문서.md')}`, {
+      method: 'POST',
+      headers: { Cookie: ctx.cookie, Origin: ctx.base, 'Content-Type': 'application/octet-stream' },
+      body: new Uint8Array(Buffer.from('# 문서\n')),
+    }).then((r) => r.json())) as any;
+    const r = await post(ctx, th, '첨부 붙임', { attachments: [up.upload.id] });
+    const id = r.message.attachments[0].id;
+    const get = (who: string) => fetch(`${ctx.base}/api/attachments/${id}`, { headers: { Authorization: `Bearer ${ctx.tokens[who].token}` } });
+    const lib = await get('librarian');
+    assert.equal(lib.status, 200);
+    assert.equal(await lib.text(), '# 문서\n');
+    assert.equal((await get('beta')).status, 404);
+    const up2 = (await fetch(`${ctx.base}/api/uploads?name=x.md`, {
+      method: 'POST',
+      headers: { Cookie: ctx.cookie, Origin: ctx.base, 'Content-Type': 'application/octet-stream' },
+      body: new Uint8Array(Buffer.from('x\n')),
+    }).then((r) => r.json())) as any;
+    const g2 = await newThread(ctx, '지울 첨부 스레드', 'alpha', ['alpha']);
+    const r2 = await post(ctx, g2, '첨부', { attachments: [up2.upload.id] });
+    assert.equal((await ctx.master('POST', `/api/threads/${g2}/state`, { action: 'trash' })).status, 200);
+    const gone2 = await fetch(`${ctx.base}/api/attachments/${r2.message.attachments[0].id}`, { headers: { Authorization: `Bearer ${ctx.tokens.librarian.token}` } });
+    assert.equal(gone2.status, 404);
+  });
+
   test('읽기만 — 멤버가 아니면 글을 못 쓴다', async () => {
     const r = await ctx.agent('librarian', 'POST', `/api/threads/${th}/messages`, { client_key: key(), body: '쓰기 시도' });
     assert.ok(r.status === 403 || r.status === 404, String(r.status));

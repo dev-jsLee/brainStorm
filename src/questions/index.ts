@@ -1,11 +1,11 @@
-// 질문함 모듈 — 경로·붙이기. 일은 ./store.ts(QuestionStore), 화면은 public/questions.js(질문함 화면 · 글 안 축소 카드)
-import type { BrainstormModule } from '../../modules.js';
+// 질문함 — core(마스터 #1873 · v0.40.0 모듈로 섰다가 v0.44.0 에 기본 기능으로 편입) · 경로·붙이기. 일은 ./store.ts(QuestionStore), 화면은 public/questions.js(질문함 화면 · 글 안 축소 카드)
+import type { CorePart } from '../modules.js';
 import { QUESTIONS_SQL, QuestionStore } from './store.js';
 
 type Q = { Params: { id: string } };
 type B = Record<string, unknown>;
 
-export const questionsModule: BrainstormModule = {
+export const questionsCore: CorePart = {
   id: 'questions',
   migrations: [{ n: 1, sql: QUESTIONS_SQL }],
   attach(store) {

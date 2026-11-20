@@ -4,7 +4,20 @@
 > 필수는 core 를 수정하는 거고, 선택은 필요한 사람이 가져다 쓰는 기능들로 만드는 거야. 플러그인 같은 거지.
 > 지금 있는 기능들도 구분이 가능하면 분리작업을 진행해보자.»
 
-이 문서는 분리의 기준과 결과다. **v0.25.0 에 분리가 끝났다**(마스터 #1193·#1196·#1207·#1213): 모듈 넷(`face`·`delegations`·`requests`·`merge`)은 — v0.40.0 에 다섯째 `questions` 가 처음부터 모듈로 섰다 — `src/modules/<id>/` 에 있고, `BRAINSTORM_MODULES` 에 없으면 안 붙는다.
+> 2026-11-20 마스터 — «'사용자가 바깥에서 만든 기능을 꽂'는 건 하지 않을 거야. 어디까지나 내가 모든 서브기능들을 만들거고,
+> 필요한 사용자들만 선택적으로 설치하는 방식으로 갈 거야.»
+>
+> 2026-11-20 마스터 #1873 — «questions까지는 기본 기능으로 편입시키고 이후 개발하는 기능들을 기본기능으로 할지,
+> 설치기능으로 할지에 따라 개발을 다르게 하는 식으로 하자.»
+>
+> **질문함(`questions`)은 v0.44.0 에 core 로 들어왔다** — `src/questions/` · 설정과 무관하게 늘 붙는다 · 옛 설정에 남은 `questions` 는 받아 주고 무시한다(`FOLDED_INTO_CORE`).
+> **새 기능은 짓기 전에 core/모듈부터 정한다**(아래 1절 기준) — 그 결정이 개발 방식을 가른다: core 면 core 를 고치고 판 B 이상·전체 시험,
+> 모듈이면 `src/modules/<id>/` 꼴(3절)로 처음부터 짓고 꺼진 상태 시험을 같이 쓴다. 정하는 것은 마스터 몫이다 — 구현 에이전트가 착수 보고 첫 줄에 «core / 모듈(id)» 안과 근거를 적고, 마스터가 바꾸면 따른다.
+>
+> **모듈은 이 저장소 안에서만 만든다.** 바깥 코드를 불러들이는 플러그인 적재(동적 import·외부 패키지 경로·마켓)는 만들지 않는다.
+> 사용자가 고르는 것은 «어느 모듈을 켤까»뿐이다 — 지금은 `BRAINSTORM_MODULES` 에 이름을 적는 것이 설치다.
+
+이 문서는 분리의 기준과 결과다. **v0.25.0 에 분리가 끝났다**(마스터 #1193·#1196·#1207·#1213): 모듈 넷(`face`·`delegations`·`requests`·`merge`)은 — v0.40.0 에 다섯째 `questions` 가 모듈로 섰다가 v0.44.0 에 core 로 들어갔다 — `src/modules/<id>/` 에 있고, `BRAINSTORM_MODULES` 에 없으면 안 붙는다.
 
 ## 1. 가르는 기준
 
@@ -30,6 +43,7 @@
 | 스레드 멈춤·재개 · 이름 · 숨김 · 지우기 | `store.ts` 3242–3470 |
 | 감사 로그 · 언어(i18n 틀) · 백업·복원 CLI · `/healthz` | `store.ts` 636–780 · `i18n.ts` · `backup.ts` |
 | 실행 목록·상세(관리 화면) | `store.ts` 3090–3240 · `public/runs.js` · `admin.js` |
+| 질문함 — 에이전트 질문지를 별도 창구로(v0.40.0 모듈 → **v0.44.0 core** · 마스터 #1873) · MCP 도구 셋(`ask_question`·`close_question`·`list_questions`) | `src/questions/` · `src/mcp.ts` · `public/questions.js` · 표는 장부 `module_migrations('questions', 1)` |
 | `→ 이름` 전달 버튼 · 메시지 전달 · `← 스레드` 끌어오기 | `parseHandoff` · `forwardMessage` · `parsePull` — 끝줄 규약과 그 버튼의 서버 쪽. 요청이 막힐 때의 되돌이도 이 버튼이라 빼면 대화 흐름이 끊긴다. **전달(forward)은 5단계에서 다시 보고 core 에 남겼다** |
 
 ### 선택 모듈
@@ -40,7 +54,6 @@
 | `delegations` | 위임 대장 — 일감과 만질 범위 선점 | `delegations`·`claims`(12) | `/api/delegations*` 8 | `claims.js` | 참여자 비활성(853–940) · WS `delegation` 알림 |
 | `requests` | 에이전트 간 «요청»(`요청→`·`보류:`) · 짝 · 사슬 깊이 | `request_pairs`·`request_holds`(14) · `messages.source_kind='request'` | `/api/request-pairs` · holds | `app.js` 일부 | 완료 처리 안의 `parseRequest`·`parseHold`(2542·2574) |
 | `merge` | 하위 스레드를 상위로 합치기 | `thread_merges`(17) | `/api/threads/:id/merge` | `app.js` 일부 | 스레드 목록에서 합친 하위 빼기 · 맥락 |
-| `questions` | 질문함 — 에이전트 질문지를 별도 창구로(v0.40.0 · 2026-11-19) | 모듈 마이그레이션 `questions` 1: `questions`·`question_items` | `/api/questions*` 9 | `questions.js` | 글의 질문 머리(`withAttachments`) · claim 칸 `open_questions` · 질문·답 글은 core `postMessage` 로 |
 
 이미 모듈식인 것: **어댑터**(`adapter/*` — 쓰는 것만 깐다) · **배포 도구**(`deploy/` · `bs-job`). 개발 도구(`design-kit`·`phase2-evidence`·`design-snapshots`)는 공개본에서 뺀다.
 

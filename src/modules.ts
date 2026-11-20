@@ -8,10 +8,11 @@ import { faceModule } from './modules/face/index.js';
 import { delegationsModule } from './modules/delegations/index.js';
 import { requestsModule } from './modules/requests/index.js';
 import { mergeModule } from './modules/merge/index.js';
-import { questionsModule } from './modules/questions/index.js';
 
 /** 선택 모듈 이름. docs/MODULES.md */
-export const KNOWN_MODULES = ['face', 'delegations', 'requests', 'merge', 'questions'] as const;
+export const KNOWN_MODULES = ['face', 'delegations', 'requests', 'merge'] as const;
+/** core 로 편입된 옛 모듈 이름 — 설정에 남아 있어도 받아 주고 무시한다(questions: v0.44.0 · 마스터 #1873) */
+export const FOLDED_INTO_CORE = ['questions'] as const;
 export type ModuleId = (typeof KNOWN_MODULES)[number];
 
 /** 모듈이 받는 손잡이. Store 안쪽 중 모듈이 부르는 것은 @internal 로 표시돼 있다 */
@@ -41,11 +42,16 @@ export interface BrainstormModule {
 }
 
 /** 옮긴 모듈 — 순서대로 붙는다 */
-export const REGISTRY: BrainstormModule[] = [faceModule, delegationsModule, requestsModule, mergeModule, questionsModule];
+export const REGISTRY: BrainstormModule[] = [faceModule, delegationsModule, requestsModule, mergeModule];
+
+/** core 조각 — 모듈과 같은 꼴(마이그레이션·붙이기·경로)이지만 늘 붙는다. 마이그레이션 장부는 옛 모듈 이름 그대로 module_migrations 에 */
+export interface CorePart extends Omit<BrainstormModule, 'id'> {
+  id: string;
+}
 
 /** BRAINSTORM_MODULES — 쉼표 목록 · 'all' 은 전부 · 비면 core 만. 모르는 이름은 오타로 보고 시작을 멈춘다 */
 export function parseModules(s: string | undefined): ModuleId[] {
-  const raw = (s ?? '').split(',').map((x) => x.trim()).filter(Boolean);
+  const raw = (s ?? '').split(',').map((x) => x.trim()).filter((x) => x && !(FOLDED_INTO_CORE as readonly string[]).includes(x));
   if (raw.length === 1 && raw[0] === 'all') return [...KNOWN_MODULES];
   const bad = raw.filter((x) => !(KNOWN_MODULES as readonly string[]).includes(x));
   if (bad.length) throw new Error(`BRAINSTORM_MODULES: 모르는 모듈 ${bad.join(', ')} — 아는 것: ${KNOWN_MODULES.join(', ')} · all`);
@@ -53,7 +59,7 @@ export function parseModules(s: string | undefined): ModuleId[] {
 }
 
 /** 모듈 마이그레이션 — 표 module_migrations 는 마이그레이션을 가진 모듈이 처음 켜질 때 생긴다 */
-export function migrateModule(db: DB, m: BrainstormModule): number {
+export function migrateModule(db: DB, m: { id: string; migrations?: ModuleMigration[] }): number {
   if (!m.migrations?.length) return 0;
   db.exec('CREATE TABLE IF NOT EXISTS module_migrations (module TEXT NOT NULL, n INTEGER NOT NULL, applied_at INTEGER NOT NULL, PRIMARY KEY (module, n))');
   const done = new Set((db.prepare('SELECT n FROM module_migrations WHERE module = ?').all(m.id) as { n: number }[]).map((r) => r.n));

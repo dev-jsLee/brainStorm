@@ -83,8 +83,19 @@ await go(room.id);
 await until(() => $(`m${q1.message_seq}`)?.querySelector('.q-mini'), '질문 글에 축소 카드');
 const mini = $(`m${q1.message_seq}`).querySelector('.q-mini');
 ok(mini.textContent.includes('질문 1문항') && mini.textContent.includes('열림'), '축소 카드 — 문항 수 · 상태');
+// 대화 안 질문창(마스터 #1874) — 이 방의 열린 질문을 그 자리에
+await until(() => !$('q-dock').hidden && $('q-dock').querySelector(`fieldset.q-item`), '방에 질문창');
+ok($('q-dock').textContent.includes('언제 올릴까?') && $('q-dock').querySelector('.q-opt.rec'), '질문창 — 문항 · 추천안');
+ok(mini.querySelector('button').textContent === '여기서 답하기', '열린 질문의 축소 카드 단추 = 여기서 답하기');
 mini.querySelector('button').click();
-await until(() => w.__S.mode === 'questions', '«질문함에서 열기» → 질문함 화면');
+ok(w.__S.mode === 'convo' && !$('q-dock').hidden, '여기서 답하기 → 방에 머묾');
+[...$('q-dock').querySelectorAll('.qd-head button')].find((b) => b.textContent === '−').click();
+ok($('q-dock').classList.contains('folded') && !$('q-dock').querySelector('fieldset'), '접기 → 머리만');
+[...$('q-dock').querySelectorAll('.qd-head button')].find((b) => b.textContent === '+').click();
+ok($('q-dock').querySelector('fieldset'), '펼치기');
+[...$('q-dock').querySelectorAll('.qd-head button')].find((b) => b.textContent === '↗').click();
+await until(() => w.__S.mode === 'questions', '질문창 ↗ → 질문함 화면');
+ok($('q-dock').hidden, '다른 화면에서는 질문창 숨김');
 await w.__route();
 await until(() => card(q1.id), '질문 카드');
 const c1 = card(q1.id);
@@ -142,6 +153,32 @@ ok(ms2.some((m) => m.body.includes(`[질문 #${q2.message_seq}] 다시 열림`))
 // 방으로 돌아가면 축소 카드 상태가 갱신돼 있다
 await go(room.id);
 await until(() => $(`m${q1.message_seq}`)?.querySelector('.q-mini.st-answered'), '방의 축소 카드 — 답함');
+// 다시 연 q2 가 질문창에 — 거기서 답하면 창이 걷힌다
+await until(() => !$('q-dock').hidden && $('q-dock').textContent.includes('둘 중?'), '다시 연 질문이 질문창에');
+const dk = $('q-dock');
+dk.querySelector('input[type=radio]').click();
+dk.querySelectorAll('input[type=checkbox]')[2].click();
+dk.querySelector('.q-actions button.primary').click();
+await until(() => $('q-dock').hidden, '질문창에서 답 → 창 걷힘');
+const ms3 = (await ctx.master('GET', `/api/threads/${room.id}/messages`)).json.messages;
+ok(ms3.some((m) => m.body.startsWith(`[질문 #${q2.message_seq} 답]`) && m.recipients[0] === 'beta'), '질문창 답 → 지시 글(받는 이 = beta)');
+
+// 메인 채팅방은 모든 방의 질문을 띄우고, «나중에» 것은 탭으로 모아 본다(마스터 #1877)
+const sub = (await ctx.master('POST', '/api/threads', { title: '하위방', members: ['alpha'], default_recipient: 'alpha' })).json.thread;
+const q3 = (await ctx.agent('alpha', 'POST', '/api/questions', { thread_id: sub.id, items: [{ question: '하위방 질문?', options: ['예', '아니오'] }] })).json.question;
+await until(() => !$('q-dock').hidden && $('q-dock').textContent.includes('하위방 질문?'), '방 질문창에 하위 스레드 질문');
+ok($('q-dock').querySelector('.qd-room')?.textContent.includes('하위방'), '다른 방 질문은 머리에 방 이름');
+ok(!$('q-dock').querySelector('.qd-tabs'), '«나중에»가 없으면 탭 없음');
+[...$('q-dock').querySelectorAll('.q-actions button')].find((b) => b.textContent === '나중에').click();
+await until(() => $('q-dock').querySelector('.qd-tabs'), '나중에 → 탭 줄');
+ok([...$('q-dock').querySelectorAll('.qd-tab')].map((b) => b.textContent).join('|') === '열림 0|나중에 1', '탭 — 열림 0 · 나중에 1');
+ok(!$('q-dock').querySelector('fieldset'), '열린 것이 없으면 탭 줄만');
+$('q-dock').querySelectorAll('.qd-tab')[1].click();
+ok($('q-dock').textContent.includes('하위방 질문?') && [...$('q-dock').querySelectorAll('.q-actions button')].some((b) => b.textContent === '다시 올리기'), '나중에 탭 — 질문 · 다시 올리기');
+[...$('q-dock').querySelectorAll('.q-actions button')].find((b) => b.textContent === '다시 올리기').click();
+await until(() => !$('q-dock').querySelector('.qd-tabs') && $('q-dock').querySelector('fieldset'), '다시 올리기 → 열림으로');
+await go(sub.id);
+await until(() => !$('q-dock').hidden && $('q-dock').textContent.includes('하위방 질문?') && !$('q-dock').querySelector('.qd-room'), '하위 스레드에서는 제 질문만 · 방 이름 없음');
 
 console.log('errors:', errors);
 if (errors.length) throw new Error('화면 오류');

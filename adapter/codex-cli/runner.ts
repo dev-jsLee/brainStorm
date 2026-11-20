@@ -34,6 +34,20 @@ export interface CodexRunnerOptions {
   attachDir?: string;
   /** 세션 장부(JSON · 세션 키 해시 → thread_id). 없으면 메모리 — 재시작하면 새 세션으로 시작한다 */
   sessionFile?: string;
+  /** brainStorm MCP(서버 POST /mcp · 마스터 #1865)를 턴마다 붙인다 — `-c mcp_servers.brainstorm.*` · 토큰은 자식 환경 BRAINSTORM_MCP_TOKEN 으로만(인자에 안 실음) */
+  mcp?: { url: string; token: string };
+}
+
+/** `exec` 앞에 붙는 MCP 설정 인자 — 토큰은 환경 변수 이름만, 실행 id 는 X-Brainstorm-Run 머리로 */
+export function mcpArgs(m: { url: string }, runId: string): string[] {
+  const url = `${m.url.replace(/\/+$/, '')}/mcp`;
+  return [
+    '-c', `mcp_servers.brainstorm.url=${JSON.stringify(url)}`,
+    '-c', 'mcp_servers.brainstorm.bearer_token_env_var="BRAINSTORM_MCP_TOKEN"',
+    '-c', `mcp_servers.brainstorm.http_headers={ "X-Brainstorm-Run" = ${JSON.stringify(runId)} }`,
+    // exec 의 승인 정책이 never 면 MCP 도구 호출이 «requires approval» 로 막힌다(11-20 실측) — 이 서버 도구는 미리 승인
+    '-c', 'mcp_servers.brainstorm.default_tools_approval_mode="approve"',
+  ];
 }
 
 const BOOK_MAX = 500;
@@ -43,8 +57,8 @@ export function bookKey(sessionKey: string): string {
   return createHash('sha256').update('brainstorm-codex:' + sessionKey).digest('hex').slice(0, 32);
 }
 
-export function buildArgs(o: Pick<CodexRunnerOptions, 'cwd' | 'globalArgs' | 'model'>, threadId: string | null): string[] {
-  const a = ['--cd', o.cwd, ...o.globalArgs, 'exec', '--skip-git-repo-check', '--json'];
+export function buildArgs(o: Pick<CodexRunnerOptions, 'cwd' | 'globalArgs' | 'model'> & { mcp?: string[] }, threadId: string | null): string[] {
+  const a = ['--cd', o.cwd, ...o.globalArgs, ...(o.mcp ?? []), 'exec', '--skip-git-repo-check', '--json'];
   if (o.model) a.push('-m', o.model);
   if (threadId) a.push('resume', threadId);
   a.push('-');
@@ -145,9 +159,9 @@ export function makeCodexRunner(o: CodexRunnerOptions): RunTurn {
 function runOnce(o: CodexRunnerOptions, req: TurnRequest, threadId: string | null): Promise<TurnResult & { threadId: string | null }> {
   return new Promise((resolve, reject) => {
     const started = Date.now();
-    const child = spawn(o.bin, buildArgs({ ...o, model: req.model || o.model }, threadId), {
+    const child = spawn(o.bin, buildArgs({ ...o, model: req.model || o.model, mcp: o.mcp ? mcpArgs(o.mcp, req.runId) : undefined }, threadId), {
       cwd: o.cwd,
-      env: o.env ?? process.env,
+      env: { ...(o.env ?? process.env), ...(o.mcp ? { BRAINSTORM_MCP_TOKEN: o.mcp.token } : {}), ...(req.threadId ? { BRAINSTORM_THREAD_ID: req.threadId } : {}), BRAINSTORM_RUN_ID: req.runId },
       stdio: ['pipe', 'pipe', 'pipe'],
       detached: true, // 프로세스 그룹째로 끊는다(도구가 띄운 자식까지)
     });

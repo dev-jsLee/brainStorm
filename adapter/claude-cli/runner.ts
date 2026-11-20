@@ -43,6 +43,17 @@ export interface ClaudeRunnerOptions {
   costFile?: string;
   /** 명시적 참조 — 글의 태그 → 원자 노트(refs.ts). 없으면 끈다 */
   refs?: RefsOptions;
+  /** brainStorm MCP(서버 POST /mcp · 마스터 #1865)를 턴마다 붙인다 — 실행마다 0600 설정 파일(토큰 · X-Brainstorm-Run)을 dir 에 쓰고 끝나면 지운다. 없으면 안 붙인다 */
+  mcp?: { url: string; token: string; dir: string };
+}
+
+/** 실행 하나의 MCP 설정 파일(서버 이름 brainstorm · 도구는 mcp__brainstorm__*) — 경로를 돌려준다 */
+export function writeMcpConfig(m: { url: string; token: string; dir: string }, runId: string): string {
+  fs.mkdirSync(m.dir, { recursive: true, mode: 0o700 });
+  const f = path.join(m.dir, `mcp-${runId.replace(/[^\w-]/g, '_')}.json`);
+  const conf = { mcpServers: { brainstorm: { type: 'http', url: `${m.url.replace(/\/+$/, '')}/mcp`, headers: { Authorization: `Bearer ${m.token}`, 'X-Brainstorm-Run': runId } } } };
+  fs.writeFileSync(f, JSON.stringify(conf), { mode: 0o600 });
+  return f;
 }
 
 /** 세션 키 → UUID(v4 모양, 결정적). 같은 키는 늘 같은 UUID */
@@ -52,10 +63,12 @@ export function sessionUuid(key: string): string {
   return `${h.slice(0, 8)}-${h.slice(8, 12)}-4${h.slice(13, 16)}-${v}${h.slice(17, 20)}-${h.slice(20, 32)}`;
 }
 
-export function buildArgs(o: Pick<ClaudeRunnerOptions, 'extraArgs' | 'model'> & { appendSystemPrompt: string }, uuid: string, resume: boolean): string[] {
+export function buildArgs(o: Pick<ClaudeRunnerOptions, 'extraArgs' | 'model'> & { appendSystemPrompt: string; mcpConfig?: string }, uuid: string, resume: boolean): string[] {
   const a = ['-p', '--output-format', 'stream-json', '--verbose', resume ? '--resume' : '--session-id', uuid];
   if (o.appendSystemPrompt.trim()) a.push('--append-system-prompt', o.appendSystemPrompt);
   if (o.model) a.push('--model', o.model);
+  // 질문함 도구는 권한 방식과 상관없이 쓸 수 있게 허용 목록에 넣는다(서버 쪽 권한·감사는 토큰이 정한다)
+  if (o.mcpConfig) a.push('--mcp-config', o.mcpConfig, '--allowedTools', 'mcp__brainstorm');
   return [...a, ...o.extraArgs];
 }
 
@@ -215,7 +228,16 @@ export function makeClaudeRunner(o: ClaudeRunnerOptions): RunTurn {
 function runOnce(o: ClaudeRunnerOptions, req: TurnRequest, uuid: string, resume: boolean): Promise<TurnResult> {
   return new Promise<TurnResult>((resolve, reject) => {
     const append = typeof o.appendSystemPrompt === 'function' ? o.appendSystemPrompt(req.lang) : o.appendSystemPrompt;
-    const child = spawn(o.bin, buildArgs({ ...o, model: req.model || o.model, appendSystemPrompt: append }, uuid, resume), {
+    let mcpConfig: string | undefined;
+    try {
+      if (o.mcp) mcpConfig = writeMcpConfig(o.mcp, req.runId);
+    } catch {
+      mcpConfig = undefined; // 못 쓰면 MCP 없이 돈다(bs-ask 로 묻는다)
+    }
+    const dropMcp = () => {
+      if (mcpConfig) fs.rmSync(mcpConfig, { force: true });
+    };
+    const child = spawn(o.bin, buildArgs({ ...o, model: req.model || o.model, appendSystemPrompt: append, mcpConfig }, uuid, resume), {
       cwd: o.cwd,
       env: { ...(o.env ?? process.env), ...(req.threadId ? { BRAINSTORM_THREAD_ID: req.threadId } : {}), BRAINSTORM_RUN_ID: req.runId },
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -258,9 +280,13 @@ function runOnce(o: ClaudeRunnerOptions, req: TurnRequest, uuid: string, resume:
     }, o.timeoutMs);
     if (req.signal.aborted) kill();
     else req.signal.addEventListener('abort', kill, { once: true });
-    child.on('error', (e) => reject(e));
+    child.on('error', (e) => {
+      dropMcp();
+      reject(e);
+    });
     child.on('close', (code) => {
       clearTimeout(timer);
+      dropMcp();
       req.signal.removeEventListener('abort', kill);
       if (timedOut) return reject(new Error(`timeout ${o.timeoutMs}ms`));
       if (aborted) return resolve({ text: '', aborted: true });

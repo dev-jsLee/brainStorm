@@ -75,7 +75,7 @@ await until(() => w.__S.mode === 'tag' && w.__S.tagCur === tg.id, '만든 뒤 �
 ok($('tg-h').textContent === '#인프라', '페이지 머리 #인프라');
 ok($('tag-list').querySelectorAll('.conv-item').length === 1, '사이드바 태그 1줄');
 ok($('tag-list').querySelector('.conv-item').classList.contains('active'), '사이드바 현재 태그 강조');
-ok(!$('tg-empty').hidden, '글 없음 안내');
+await until(() => !$('tg-empty').hidden, '글 없음 안내'); // 질문함이 core 라 첫 화면 요청이 하나 늘어 기다린다(#1873)
 ok(!$('tg-compose').hidden, '글쓰기 칸 있음');
 ok($('tg-to').value === '', '대표 없음 → 수신자 비움');
 
@@ -271,6 +271,23 @@ ok($('tag-list').querySelector('details summary')?.textContent === '보관 1', '
   w.eval('clearReply')();
   ta.value = '';
   ta.dispatchEvent(new w.Event('input', { bubbles: true }));
+}
+// 태그 목록 접기(마스터 #1879): 살아 있는 태그가 넷 이상이면 최근 3개만 + 목록 위 «열기 (n개 더)» ↔ «접기»
+{
+  ok($('tag-more').hidden, '살아 있는 태그 셋 이하 → 열기 단추 없음');
+  ok((await ctx.master('POST', '/api/tags', { name: '접기시험' })).status === 201, '넷째 태그');
+  await w.__loadTags();
+  const rows = () => $('tag-list').querySelectorAll(':scope > .conv-item').length;
+  ok(!$('tag-more').hidden && $('tag-more').textContent === '열기 (1개 더)' && rows() === 3, '기본은 3개 + «열기 (1개 더)»');
+  ok(!$('tag-list').textContent.includes('#접기시험'), '부른 적 없는 넷째는 접힘');
+  $('tag-more').click();
+  ok($('tag-more').textContent === '접기' && rows() === 4 && $('tag-more').getAttribute('aria-expanded') === 'true', '열기 → 4개 · «접기»');
+  $('tag-more').click();
+  ok(rows() === 3 && $('tag-more').textContent.startsWith('열기'), '접기 → 다시 3개');
+  await go('#tag/' + w.__S.tags.find((x) => x.name === '접기시험').id);
+  ok(rows() === 4 && $('tag-list').querySelector('.conv-item.active')?.textContent.includes('#접기시험') && $('tag-more').textContent === '열기', '접혀 있어도 지금 연 태그는 남김');
+  $('tag-more').click();
+  ok(w.localStorage.getItem('bs.tags-open') === '1', '열림 상태를 기억');
 }
 // 태그 관리(2026-11-19 · 마이그레이션 21): 숨김 → 목록·고르개에서 빠지고 «숨김 포함»으로만 · 삭제(휴지통) → 안내·되살리기 · 영구 삭제는 이름 확인
 {

@@ -31,13 +31,18 @@ describe('선택 모듈 틀', () => {
     assert.deepEqual(parseModules(' face , delegations,face'), ['face', 'delegations']);
     assert.deepEqual(parseModules('all'), [...KNOWN_MODULES]);
     assert.throws(() => parseModules('face,facee'), /모르는 모듈 facee/);
+    // core 로 편입된 옛 이름은 받아 주고 뺀다(마스터 #1873)
+    assert.deepEqual(parseModules('face,questions'), ['face']);
+    assert.ok(!(KNOWN_MODULES as readonly string[]).includes('questions'));
   });
 
   test('꺼진 모듈은 경로도 표도 없다 · 켜면 붙고 마이그레이션은 한 번만', async () => {
     const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bs-mod-'));
     let { app, base } = await boot(dataDir, []);
     assert.equal((await fetch(base + '/api/mod-probe')).status, 404);
-    assert.equal(app.db.prepare("SELECT name FROM sqlite_master WHERE name = 'module_migrations'").get(), undefined);
+    // 장부 표는 core 질문함(옛 모듈 이름 'questions')이 늘 만든다(마스터 #1873) — 꺼진 모듈의 줄은 없다
+    assert.equal((app.db.prepare("SELECT COUNT(*) AS n FROM module_migrations WHERE module = 'merge'").get() as { n: number }).n, 0);
+    assert.equal((app.db.prepare("SELECT COUNT(*) AS n FROM module_migrations WHERE module = 'questions'").get() as { n: number }).n, 1);
     await app.close();
     for (let i = 0; i < 2; i++) {
       ({ app, base } = await boot(dataDir, ['merge']));

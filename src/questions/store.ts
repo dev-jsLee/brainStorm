@@ -1,8 +1,8 @@
 // 질문함 모듈(questions · 2026-11-19 마스터 설계 합의) — 에이전트가 물을 결정을 답 본문이 아니라 구조화된 «질문»으로 올린다.
 // 마스터는 질문함 화면에서 고르고, 답은 그 방에 «지시» 글로 돌아가 물은 에이전트를 다시 부른다(배달 = 수신 대상 asker).
 // 꼴은 Claude Code 의 질문지와 같다: 한 번 1~4문항 · 문항당 2~4안 · 추천안은 첫 자리. 꺼지면 경로 404 · 표·행은 그대로.
-import { newId } from '../../crypto.js';
-import { t as tr } from '../../i18n.js';
+import { newId } from '../crypto.js';
+import { t as tr } from '../i18n.js';
 import {
   QUESTION_OPEN,
   type ClaimQuestion,
@@ -13,8 +13,8 @@ import {
   type QuestionItemStatus,
   type QuestionOption,
   type QuestionStatus,
-} from '../../protocol.js';
-import { ApiError, now, type Principal, type Row, type Store } from '../../store.js';
+} from '../protocol.js';
+import { ApiError, now, type Principal, type Row, type Store } from '../store.js';
 
 export const QUESTIONS_SQL = `
 CREATE TABLE IF NOT EXISTS questions (

@@ -5,7 +5,7 @@
 import assert from 'node:assert/strict';
 import { after, before, describe, test } from 'node:test';
 import { buildPrompt } from '../adapter/openclaw-channel/src/mapping.js';
-import { normalizeItems } from '../src/modules/questions/store.js';
+import { normalizeItems } from '../src/questions/store.js';
 import { renderOpenQuestions, type ClaimQuestion } from '../src/protocol.js';
 import { newThread, post, setup, type Ctx } from './helpers.js';
 
@@ -218,16 +218,16 @@ describe('질문함 API', () => {
   });
 });
 
-describe('질문함 꺼짐 · 프롬프트 조각', () => {
-  test('모듈이 꺼지면 경로 404 · claim 칸 null · 글에 질문 머리 없음', async () => {
+describe('질문함은 core · 프롬프트 조각', () => {
+  test('선택 모듈을 하나도 안 켜도 경로가 열리고 claim 에 칸이 실린다(마스터 #1873)', async () => {
     const ctx = await setup();
     try {
-      const th = await newThread(ctx, '꺼짐', null, ['alpha']);
-      assert.equal((await ctx.agent('alpha', 'POST', '/api/questions', { thread_id: th, items: [ITEM('?')] })).status, 404);
-      assert.equal((await ctx.master('GET', '/api/questions')).status, 404);
+      const th = await newThread(ctx, '모듈 없음', null, ['alpha']);
+      assert.equal((await ctx.agent('alpha', 'POST', '/api/questions', { thread_id: th, items: [ITEM('?')] })).status, 201);
+      assert.equal((await ctx.master('GET', '/api/questions')).status, 200);
       await post(ctx, th, '일', { recipients: ['alpha'] });
       const c = (await ctx.agent('alpha', 'POST', '/api/adapter/claim', { worker: 'manual' })).json.claim;
-      assert.equal(c.open_questions, null);
+      assert.notEqual(c.open_questions, null);
     } finally {
       await ctx.close();
     }

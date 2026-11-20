@@ -9,7 +9,9 @@ import { WebSocketServer, type WebSocket } from 'ws';
 import type { Config } from './config.js';
 import { openDb, type DB } from './db.js';
 import { clientBundle, has, languages, normLang, t } from './i18n.js';
-import { mountModules, type BrainstormModule } from './modules.js';
+import { mountMcp } from './mcp.js';
+import { migrateModule, mountModules, type BrainstormModule } from './modules.js';
+import { questionsCore } from './questions/index.js';
 import { ANON_ACTOR, ApiError, Store, type NoticeEvent, type Principal } from './store.js';
 
 const COOKIE = 'bs_session';
@@ -341,7 +343,13 @@ export async function buildApp(cfg: Config, opts: { logger?: boolean; registry?:
   });
   // 요청 창구(마스터 #352): 보류된 요청 목록·확인 · 허용 짝 조회(바꾸기는 CLI)
   // 선택 모듈(마스터 #1193 · docs/MODULES.md): 켠 것만 붙는다 — 대면(face) 경로는 src/modules/face
+  // 질문함은 core(마스터 #1873) — 설정과 무관하게 늘 붙는다(장부는 옛 모듈 이름 'questions' 그대로라 옛 DB 도 다시 안 만든다)
+  migrateModule(db, questionsCore);
+  questionsCore.attach?.(store);
+  questionsCore.routes?.(fastify, { db, cfg, store, auth });
   mountModules(fastify, { db, cfg, store, auth }, cfg.modules, opts.registry);
+  // MCP 문(마스터 #1865) — 에이전트 토큰으로 brainStorm 도구를 부른다 · 도구 목록은 켜진 모듈을 따른다(src/mcp.ts)
+  mountMcp(fastify, store, auth, cfg.modules);
   fastify.get<P>('/api/threads/:id/runs', { preHandler: auth }, async (req) => ({ runs: store.listRuns(req.principal!, req.params.id) }));
   fastify.get<P>('/api/threads/:id/deliveries', { preHandler: auth }, async (req) => ({
     deliveries: store.listDeliveries(req.principal!, req.params.id),

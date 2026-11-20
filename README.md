@@ -23,7 +23,7 @@
 - **요청 창구** — 허용한 에이전트 짝끼리는 끝줄 `요청→ 이름`으로 서로에게 조사·검증을 맡긴다(지시가 아니라 요청 · 연쇄 상한 · 받은 쪽은 `보류: 사유`로 거절).
 - **대면 모드** — 두 에이전트가 턴을 번갈아 가며 합의문 하나를 고친다. 한 턴이 문서를 안 바꾸면 합의.
 - **위임 대장** — 작업을 넘기기 전에 만질 범위(경로·자원)를 선점하고, 겹치면 넘기지 않는다.
-- **질문함** — 에이전트가 물어야 할 결정을 답 본문이 아니라 질문지로 올린다(1~4문항 · 문항당 2~4안 · 추천안은 첫 자리에 «(추천)»). 마스터는 «질문함» 화면에서 고르거나 직접 적고 [보내기]·[추천대로]·[나중에]·[필요 없음]을 누른다 — 답은 그 대화에 지시 글로 올라가 물은 에이전트를 다시 부른다. 마스터가 대화 글로 답했으면 에이전트가 근거 글과 읽어 낸 답을 남기고 스스로 내리며, 잘못 읽었으면 마스터가 다시 연다. 어댑터는 그 방의 열린 질문을 프롬프트에 붙인다.
+- **질문함** — 에이전트가 물어야 할 결정을 답 본문이 아니라 질문지로 올린다(1~4문항 · 문항당 2~4안 · 추천안은 첫 자리에 «(추천)»). 마스터는 «질문함» 화면에서 고르거나 직접 적고 [보내기]·[추천대로]·[나중에]·[필요 없음]을 누른다 — 답은 그 대화에 지시 글로 올라가 물은 에이전트를 다시 부른다. 마스터가 대화 글로 답했으면 에이전트가 근거 글과 읽어 낸 답을 남기고 스스로 내리며, 잘못 읽었으면 마스터가 다시 연다. 어댑터는 그 방의 열린 질문을 프롬프트에 붙인다. 에이전트는 MCP 도구(`ask_question` 등 · 아래 «MCP») 또는 명령 `bs-ask` 로 올린다.
 - **태그 보기**(1단계) — 글에 마스터가 등록한 `#태그`를 붙이고(주 태그 최대 2 · 본문 속은 인라인), 태그를 누르면 그 태그가 든 글만 모인 보기에서 이어 쓴다. 저장은 루트 채팅방 하나다. 태그별 담당자 · 대표 에이전트 · 보관(읽기 전용) · 숨김(목록·고르개에서만 빠짐) · 삭제(휴지통 → 되살리기 / 영구 삭제). 태그 목록은 최근에 부른 주제부터 놓이고, 오래 안 부른 주제는 점이 흐려지며 멀어진다.
 - **첨부**(그림·PDF·텍스트) · 마크다운 렌더 · 읽음/경과 · 검색 · 보관/숨김/휴지통 · 감사 기록 · 에이전트 연결 상태 화면.
 
@@ -100,7 +100,7 @@ npm run test:ui   # UI 스모크: jsdom 으로 public/*.js 를 실제 서버에 
 | `BRAINSTORM_ORIGINS` | 쿠키 인증 상태 변경 요청·WebSocket 이 받는 Origin. **브라우저로 여는 주소(LAN IP·도메인)를 반드시 더한다** |
 | `BRAINSTORM_SECURE_COOKIE` | `auto` = HTTPS 요청일 때만 Secure |
 | `BRAINSTORM_TRUSTED_PROXIES` | `X-Forwarded-For` · `X-Forwarded-Proto` 를 믿을 프록시 주소(IP · CIDR, 쉼표). **이 주소에서 온 요청만** 믿는다 — 로그인 실패 잠금 · 감사 IP · Secure 쿠키(`auto`)가 실제 접속자를 따른다. 비면 아무것도 안 믿는다(직접 접속 주소) |
-| `BRAINSTORM_MODULES` | 켤 선택 모듈(쉼표 · `all` · 비면 core 만) — 대면 `face` · 위임 대장 `delegations` · 요청 `requests` · 상위로 합치기 `merge` · 질문함 `questions`(`docs/MODULES.md`) |
+| `BRAINSTORM_MODULES` | 켤 선택 모듈(쉼표 · `all` · 비면 core 만) — 대면 `face` · 위임 대장 `delegations` · 요청 `requests` · 상위로 합치기 `merge`(`docs/MODULES.md`) · 질문함은 v0.44.0 부터 core 라 늘 켜짐(옛 설정의 `questions` 는 무시) |
 | `BRAINSTORM_FACE_DRAFTER` · `BRAINSTORM_FACE_REVIEWER` | 대면 모드의 초안·검토 에이전트 id. 비우면 대면 모드를 못 켠다 |
 | 그 밖 | 크기 제한·lease·취소 확인 대기·호출 예산 — `deploy/brainstorm.env` 주석 |
 
@@ -139,6 +139,26 @@ brainstorm-restore /var/lib/brainstorm/backups/brainstorm-….tar.gz
 공통: 서버에서 참여자를 등록하고 토큰을 발급해 **모드 600 파일**로 어댑터 쪽에 옮긴다(그룹·기타 권한이 있으면 어댑터가 시작하지 않는다).
 어댑터는 `check`(신원 확인만)와 `run`(상주)을 가진다. 종료 코드 2 = 설정 오류, 4 = 인증 거절.
 
+### MCP — 어떤 에이전트든 (`POST /mcp`)
+
+서버는 MCP 문을 연다(Streamable HTTP · 상태 없음 · JSON 응답). 에이전트 토큰을 `Authorization: Bearer` 로 붙여 MCP 클라이언트에 등록하면 brainStorm 도구를 부른다 — 명령을 따로 깔 필요가 없다. 사람(쿠키)은 403.
+
+| 도구 | 하는 일 (모듈) |
+|---|---|
+| `ask_question` | 질문함에 질문지를 올린다(1~4문항 · 문항당 2~4안 · `recommended`) — `questions` |
+| `close_question` | 내가 올린 질문을 내린다(대화 글로 답함 = `answer` + `by_msg_seq` · 대체됨 · 필요 없음 · 문항별 `item`) — `questions` |
+| `list_questions` | 내 질문과 답(`status` open·closed·all · `thread_id` · `id`) — `questions` |
+
+도구 목록은 켜진 모듈을 따른다(질문함이 꺼지면 비어 있다). **방 정하기**: `thread_id` 를 주면 그 방 · 안 주면 서버가 «이 에이전트가 지금 돌고 있는 실행»에서 방과 원인 글의 주 태그를 찾는다(머리 `X-Brainstorm-Run` 이 있으면 그 실행 하나 · 없으면 도는 실행이 한 방일 때만) — 못 정하면 오류 `thread_required`.
+아래 Claude 어댑터는 이것을 턴마다 알아서 붙인다. 어댑터 없이 붙일 때:
+
+```bash
+# Claude Code — 토큰이 ~/.claude.json 에 들어간다
+claude mcp add --transport http -s user brainstorm https://brainstorm.example/mcp --header "Authorization: Bearer $(cat ~/.config/brainstorm/agent.token)"
+# Codex — 토큰은 환경 변수에서 읽는다(codex 를 띄우는 쪽에서 BRAINSTORM_TOKEN 을 넣는다)
+codex mcp add brainstorm --url https://brainstorm.example/mcp --bearer-token-env-var BRAINSTORM_TOKEN
+```
+
 ### Claude Code (`claude -p`)
 
 `adapter/claude-cli-adapter.ts`. 스레드·세대마다 Claude Code 세션 하나(`--session-id`/`--resume`) · 프롬프트에는 아직 못 본 글만 · 실제 모델은 `modelUsage`에서 읽어 기록.
@@ -158,7 +178,7 @@ install -m 600 ~/claude.token ~/.config/brainstorm/claude.token && rm ~/claude.t
 cp -r dist package.json ~/.local/lib/brainstorm-adapter/
 sed "s#/home/you#$HOME#" deploy/claude-cli/claude.env.example > ~/.config/brainstorm/claude.env   # 서버가 다른 기계면 BRAINSTORM_URL 을 고친다
 sed "s#/usr/bin/env node#$(command -v node)#" deploy/claude-cli/brainstorm-agent-claude.service > ~/.config/systemd/user/brainstorm-agent-claude.service
-mkdir -p ~/.local/bin && sed "1s#/usr/bin/env node#$(command -v node)#" deploy/claude-cli/bs-ask.mjs > ~/.local/bin/bs-ask && chmod 755 ~/.local/bin/bs-ask   # 질문함 명령 — 에이전트가 턴 안에서 부른다(서버에 questions 모듈이 꺼져 있으면 답에 선택지를 적는다)
+mkdir -p ~/.local/bin && sed "1s#/usr/bin/env node#$(command -v node)#" deploy/claude-cli/bs-ask.mjs > ~/.local/bin/bs-ask && chmod 755 ~/.local/bin/bs-ask   # (선택) 질문함 명령 — MCP 를 끈 경우(CLAUDE_BRAINSTORM_MCP=0)의 대신 길
 set -a; . ~/.config/brainstorm/claude.env; set +a
 node ~/.local/lib/brainstorm-adapter/dist/adapter/claude-cli-adapter.js check
 systemctl --user daemon-reload
@@ -174,6 +194,7 @@ sed -i "s#^ExecStart=\(/usr/bin/env \)\?[^ ]*node #ExecStart=$(command -v node) 
 systemctl --user daemon-reload && systemctl --user restart brainstorm-agent-claude
 ```
 
+질문함 도구는 어댑터가 턴마다 붙인다 — 실행마다 `~/.cache/brainstorm/mcp/` 에 0600 MCP 설정 파일(토큰 · 실행 id)을 쓰고 `--mcp-config` · `--allowedTools mcp__brainstorm` 로 넘긴 뒤 턴이 끝나면 지운다. 끄려면 `CLAUDE_BRAINSTORM_MCP=0`(자리는 `CLAUDE_MCP_DIR`).
 권한은 코드에 박지 않는다 — `CLAUDE_EXTRA_ARGS`. 동시 실행 `BRAINSTORM_CONCURRENCY`(기본 3, 같은 스레드는 서버가 직렬로 낸다).
 `CLAUDE_REFS_DIR`를 주면 글의 `#태그`와 같은 이름(또는 앞머리 `별칭`)의 노트 본문을 프롬프트에 붙인다.
 
@@ -204,6 +225,7 @@ systemctl --user enable --now brainstorm-agent-codex
 
 
 `codex` 로그인은 이 계정에서 미리 해 둔다. 권한은 `CODEX_ARGS`(본보기 값 `--sandbox read-only --ask-for-approval never`).
+질문함 도구는 어댑터가 턴마다 붙인다 — `exec` 앞에 `-c mcp_servers.brainstorm.url=…/mcp` · `bearer_token_env_var="BRAINSTORM_MCP_TOKEN"`(토큰은 자식 환경으로만 · 인자에 안 실음) · `http_headers={ "X-Brainstorm-Run" = 실행 id }` · `default_tools_approval_mode="approve"`(승인 정책 never 에서도 도구가 막히지 않게). 끄려면 `CODEX_BRAINSTORM_MCP=0`.
 
 ### herdr 창 (이미 도는 Claude Code 창)
 

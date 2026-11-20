@@ -746,6 +746,8 @@ function setMode(mode) {
   $('tag-page').hidden = mode !== 'tag';
   if (mode !== 'tag') S.tagCur = null;
   if (page) setDrawer(false);
+  if (mode !== 'convo') $('q-dock').hidden = true;
+  else if (QD.all.length) renderQDock();
   syncMenu();
   syncToBottom();
 }
@@ -812,6 +814,9 @@ async function openThread(id) {
   S.detail = null;
   S.face = null;
   clearReply();
+  QD.all = [];
+  QD.list = [];
+  renderQDock(); // 앞 대화의 질문창을 걷는다(questions.js)
   $('messages').replaceChildren();
   $('empty').hidden = true;
   $('thread').hidden = false;
@@ -822,6 +827,7 @@ async function openThread(id) {
     await Promise.all([loadDetail(), loadContext(), fetchNew(), loadRuns()]);
     if (S.detail && !faceActive()) renderRecipients(); // 글을 다 읽은 뒤 «직전 대화 상대»를 다시 고른다(상세가 글보다 먼저 올 수 있다)
     syncEmpty();
+    loadQDock().catch(() => {}); // 이 대화의 열린 질문(마스터 #1874)
     const th = S.detail.thread;
     announce(t('app.thread_opened', { kind: kindLabel(th), title: th.title, path: pathOf(th) }));
     renderList();
@@ -1491,6 +1497,7 @@ function tagItem(tg) {
     el('div', { class: 'l2' }, `${tagRecipientLine(tg)} · ${t(`app.tag_band_${band}`)}`),
   );
 }
+const TAG_FOLD = 3;
 function renderTagList() {
   const nav = $('tag-list');
   if (!nav) return;
@@ -1501,7 +1508,16 @@ function renderTagList() {
   const archived = S.tags.filter((x) => !!x.archived_at && !x.deleted_at);
   const hidden = S.tags.filter((x) => !!x.hidden_at && !x.archived_at && !x.deleted_at);
   const trash = S.me?.is_master ? S.tags.filter((x) => !!x.deleted_at) : [];
-  const items = live.map(tagItem);
+  // 접힘(마스터 #1879): 살아 있는 태그는 기본 최근 부른 3개만(서버가 last_called_at 내림차순으로 줌) · 목록 위 «열기 (n개 더)»/«접기» ·
+  // 상태는 이 브라우저에 기억 · 지금 연 태그가 3개 밖이면 접혀 있어도 그 줄은 남긴다 · 숨김·보관·휴지통 묶음은 원래 접힌 한 줄이라 그대로
+  const open = store('bs.tags-open') === '1';
+  const shown = open ? live : live.filter((x, i) => i < TAG_FOLD || (S.mode === 'tag' && S.tagCur === x.id));
+  const btn = $('tag-more');
+  btn.hidden = live.length <= TAG_FOLD;
+  const rest = live.length - shown.length;
+  btn.textContent = open ? t('app.tag_fold') : rest ? t('app.tag_unfold', { n: rest }) : t('app.tag_unfold_all');
+  btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+  const items = shown.map(tagItem);
   const group = (key, label, list) => {
     const d = el('details', { class: `tag-group tag-group-${key}`, open: store(`bs.tags-${key}-open`) === '1' ? '' : null }, el('summary', {}, label), ...list.map(tagItem));
     d.addEventListener('toggle', () => store(`bs.tags-${key}-open`, d.open ? '1' : '0'));
@@ -1512,6 +1528,10 @@ function renderTagList() {
   if (trash.length) group('trash', t('app.tag_trash_n', { n: trash.length }), trash);
   nav.replaceChildren(...(items.length ? items : [el('div', { class: 'empty-list' }, t('app.no_tags'))]));
 }
+$('tag-more').addEventListener('click', () => {
+  store('bs.tags-open', store('bs.tags-open') === '1' ? '0' : '1');
+  renderTagList();
+});
 $('tag-show-hidden').addEventListener('change', () => {
   store('bs.tags-hidden', $('tag-show-hidden').checked ? '1' : '0');
   renderTagList();
@@ -3455,7 +3475,6 @@ async function boot() {
   const dlgOn = S.modules.has('delegations');
   document.querySelector('.menu-item[data-menu="claims"]').hidden = !dlgOn;
   // 질문함(모듈 questions): 메뉴와 열린 수
-  document.querySelector('.menu-item[data-menu="questions"]').hidden = !S.modules.has('questions');
   $('tabbtn-claims').hidden = !dlgOn;
   $('me').textContent = S.me.name;
   $('logout-btn').hidden = false;
