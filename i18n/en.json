@@ -1042,6 +1042,8 @@
   "app.open_thread": "Open thread",
   "app.copied_seq": "#{seq} copied",
   "app.copy_failed": "Copy failed",
+  "app.copy_code_title": "Copy this code block",
+  "app.copied_code": "✓ Copied",
   "app.clipboard_blocked": "The browser blocked writing to the clipboard.",
   "app.who_master": "{name} (master)",
   "app.copy_head": "# {title} ({kind}) — {n} messages · copied {time}",

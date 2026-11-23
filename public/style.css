@@ -298,6 +298,15 @@ body.rail-collapsed #rail-btn .i-close { display: none; }
 .body pre { background: var(--code); border: 1px solid var(--line); padding: 10px 14px; border-radius: 4px; overflow-x: auto; white-space: pre-wrap; font-size: 13px; line-height: 1.55; }
 .body code { font-family: var(--mono); font-size: 13px; border: 1px solid var(--line); padding: 0 4px; border-radius: 2px; }
 .body pre code { border: none; padding: 0; }
+/* 코드 블록 복사(마스터 #1925) — 손가락 화면은 늘, 마우스 화면은 블록에 올렸을 때 */
+.body pre.has-copy { position: relative; padding-top: 30px; }
+.body pre .code-copy { position: absolute; top: 4px; right: 6px; font-family: inherit; font-size: 12px; line-height: 1.4; padding: 1px 8px; color: var(--accent-700); background: var(--bg); border: 1px solid var(--line); border-radius: 3px; white-space: nowrap; }
+.body pre .code-copy.done { color: var(--ok); border-color: var(--ok); }
+@media (hover: hover) and (min-width: 761px) {
+  .body pre.has-copy { padding-top: 10px; }
+  .body pre .code-copy { opacity: 0; transition: opacity .12s; }
+  .body pre:hover .code-copy, .body pre .code-copy:focus-visible { opacity: 1; }
+}
 /* 마크다운 ↔ 원문(마스터 #477) */
 .body.plain { white-space: pre-wrap; }
 .body.md > :first-child { margin-top: 0; } .body.md > :last-child { margin-bottom: 0; }
@@ -755,10 +764,7 @@ button.linkish { background: none; border: 0; padding: 0; cursor: pointer; text-
   .convo-head { position: relative; }
   .title-row { flex-wrap: nowrap; }
   .title-row .head-link, #t-menu, #aux-btn { display: none !important; }
-  /* 글 동작은 길게 누르면(또는 키보드로 들어오면) 그 글에만 */
-  .msg .msgbar .actions { display: none; }
-  .msg.show-actions .msgbar .actions, .msg:focus-within .msgbar .actions { display: flex; }
-  .msg.show-actions { background: var(--hover); }
+  /* 글 동작(답장·복사·분기)은 손가락 화면에서 늘 보인다(마스터 #1925 — 길게 누르기는 없앴다) */
   /* 작성란: 받는 쪽 칩 줄(+ 출처) / [첨부 | 입력 | 전송] — 대상 줄·스레드 생성(⋯ 시트)·단축키는 뺀다 */
   .composer { display: grid; grid-template-columns: 44px minmax(0, 1fr) auto; column-gap: 8px; row-gap: 8px; align-items: end; }
   .composer > * { grid-column: 1 / -1; }

@@ -1042,6 +1042,8 @@
   "app.open_thread": "스레드 열기",
   "app.copied_seq": "#{seq} 복사됨",
   "app.copy_failed": "복사 실패",
+  "app.copy_code_title": "이 코드 블록 복사",
+  "app.copied_code": "✓ 복사됨",
   "app.clipboard_blocked": "브라우저가 클립보드 쓰기를 막았습니다.",
   "app.who_master": "{name}(마스터)",
   "app.copy_head": "# {title} ({kind}) — {n}개 메시지 · {time} 복사",

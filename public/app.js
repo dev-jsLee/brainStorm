@@ -198,6 +198,22 @@ function fillBody(body, text, plain) {
   body.classList.toggle('plain', plain);
   body.classList.toggle('md', !plain);
   body.innerHTML = plain ? renderPlain(text) : renderBody(text); // 둘 다 이스케이프 후에만 태그를 넣는다
+  if (!plain) for (const pre of body.querySelectorAll('pre')) addCodeCopy(pre);
+}
+/** 코드 블록 오른쪽 위 «복사»(마스터 #1925) — 블록 안 글자(이스케이프가 풀린 원문)만 옮긴다 */
+function addCodeCopy(pre) {
+  const code = pre.querySelector('code') ?? pre;
+  const b = el('button', { type: 'button', class: 'code-copy', title: t('app.copy_code_title') }, t('app.copy'));
+  b.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    const ok = await copyText(code.textContent ?? '');
+    if (!ok) return notify(t('app.copy_failed'), t('app.clipboard_blocked'));
+    b.textContent = t('app.copied_code');
+    b.classList.add('done');
+    setTimeout(() => ((b.textContent = t('app.copy')), b.classList.remove('done')), 1500);
+  });
+  pre.classList.add('has-copy');
+  pre.prepend(b);
 }
 function el(tag, attrs = {}, ...kids) {
   const e = document.createElement(tag);
@@ -3587,35 +3603,6 @@ document.addEventListener('keydown', (e) => {
 });
 
 // 글 동작(답장·복사·분기 …): 좁은 화면에선 숨겨 두고 글을 길게 누르면 그 글에만 보인다 — 다른 곳을 누르면 걷힌다
-{
-  let timer = 0;
-  let start = null;
-  const clear = () => {
-    clearTimeout(timer);
-    timer = 0;
-  };
-  $('messages').addEventListener('pointerdown', (e) => {
-    if (!isNarrow() || e.pointerType === 'mouse' || e.target.closest('button, a, input, textarea, select, summary')) return;
-    const m = e.target.closest('.msg');
-    if (!m) return;
-    start = [e.clientX, e.clientY];
-    clear();
-    timer = setTimeout(() => {
-      timer = 0;
-      for (const x of document.querySelectorAll('.msg.show-actions')) if (x !== m) x.classList.remove('show-actions');
-      m.classList.add('show-actions');
-      navigator.vibrate?.(10);
-    }, 480);
-  });
-  $('messages').addEventListener('pointermove', (e) => {
-    if (timer && start && Math.hypot(e.clientX - start[0], e.clientY - start[1]) > 10) clear();
-  });
-  for (const t of ['pointerup', 'pointercancel']) $('messages').addEventListener(t, clear);
-  document.addEventListener('click', (e) => {
-    if (e.target.closest('.msg.show-actions')) return;
-    for (const x of document.querySelectorAll('.msg.show-actions')) x.classList.remove('show-actions');
-  });
-}
 
 // 상단 보조 패널 아이콘의 금색 점 = 응답 대기 띠가 떠 있을 때
 new MutationObserver(() => {
