@@ -65,6 +65,13 @@ describe('OpenClaw 채널: 변환', () => {
     assert.match(p, /▶ #9 마스터\(마스터\) · 지시\n질문/);
     assert.match(p, /#8 너\(이전 답\) · 제안/);
     assert.doesNotMatch(p, /새 에이전트/);
+    // 답장·인용 대상을 머리 줄에 싣는다(마스터 #1885)
+    const r = buildPrompt({
+      threadTitle: '시험', generation: 1, triggerSeq: 11, selfId: 'oc-main', participants: parts,
+      newMessages: [{ seq: 11, author_id: 'master', source_kind: 'instruction', body: '이거 올려', reply_to_seq: 7, quote_of_seq: 5 } as any],
+    });
+    assert.match(r, /▶ #11 마스터\(마스터\) · 지시 · #7에 답장 · #5 인용\n이거 올려/);
+    assert.match(p, /▶ #9 마스터\(마스터\) · 지시\n/, '대상이 없으면 머리 줄 그대로');
   });
 
   test('실제 모델 표기 · 가림', () => {

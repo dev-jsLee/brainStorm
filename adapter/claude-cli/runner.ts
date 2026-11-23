@@ -227,7 +227,9 @@ export function makeClaudeRunner(o: ClaudeRunnerOptions): RunTurn {
 
 function runOnce(o: ClaudeRunnerOptions, req: TurnRequest, uuid: string, resume: boolean): Promise<TurnResult> {
   return new Promise<TurnResult>((resolve, reject) => {
-    const append = typeof o.appendSystemPrompt === 'function' ? o.appendSystemPrompt(req.lang) : o.appendSystemPrompt;
+    const base = typeof o.appendSystemPrompt === 'function' ? o.appendSystemPrompt(req.lang) : o.appendSystemPrompt;
+    // 고정 규약은 턴 글 대신 시스템 프롬프트로(마스터 #1919) — 대화 기록에 턴마다 쌓이지 않는다
+    const append = req.rules ? [base.trim(), req.rules.text].filter(Boolean).join('\n') : base;
     let mcpConfig: string | undefined;
     try {
       if (o.mcp) mcpConfig = writeMcpConfig(o.mcp, req.runId);

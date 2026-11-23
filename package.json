@@ -1,6 +1,6 @@
 {
   "name": "brainstorm",
-  "version": "0.47.0",
+  "version": "0.48.0",
   "description": "brainStorm — 사람 한 명과 AI 에이전트들을 위한 자체 호스팅 스레드 대화 서버",
   "license": "MIT",
   "type": "module",

@@ -13,6 +13,7 @@ import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { RunTurn, TurnRequest, TurnResult } from '../openclaw-channel/src/worker.js';
+import { RulesTracker } from '../openclaw-channel/src/mapping.js';
 import { stageAttachments } from '../claude-cli/runner.js';
 import { t } from '../../src/i18n.js';
 
@@ -130,6 +131,7 @@ function loadBook(file?: string): Record<string, string> {
 
 export function makeCodexRunner(o: CodexRunnerOptions): RunTurn {
   const book = loadBook(o.sessionFile);
+  const rulesTracker = new RulesTracker();
   const save = () => {
     const keys = Object.keys(book);
     for (const k of keys.slice(0, Math.max(0, keys.length - BOOK_MAX))) delete book[k];
@@ -144,13 +146,16 @@ export function makeCodexRunner(o: CodexRunnerOptions): RunTurn {
     const key = bookKey(req.sessionKey);
     const threadId = book[key] ?? null;
     const pre = typeof o.preamble === 'function' ? o.preamble(req.lang) : o.preamble;
-    const head = !threadId && pre.trim() ? `${pre.trim()}\n\n` : '';
+    // 고정 규약(마스터 #1919): 새 스레드·규약이 바뀐 턴·20턴마다 전문, 그 사이는 한 줄 참조 — codex 스레드 기록이 첫 턴 전문을 들고 있다
+    const rules = !req.rules ? '' : threadId ? rulesTracker.pick(key, req.rules) : req.rules.text;
+    const head = [!threadId ? pre.trim() : '', rules].filter(Boolean).map((x) => `${x}\n\n`).join('');
     const r = await runOnce(o, { ...req, prompt: head + req.prompt + extra }, threadId);
     if (r.threadId && r.threadId !== threadId) {
       delete book[key]; // 넣은 순서 = 최근 순서
       book[key] = r.threadId;
       save();
     }
+    if (req.rules && !threadId && r.threadId) rulesTracker.mark(key, req.rules); // 새 스레드가 전문을 받았다고 적는다
     const { threadId: _t, ...rest } = r;
     return { ...rest, meta: { ...rest.meta, model: req.model || o.model }, extra: { resumed: !!threadId } };
   };

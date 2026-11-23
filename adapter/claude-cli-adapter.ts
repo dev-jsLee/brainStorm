@@ -80,6 +80,7 @@ async function main(): Promise<number> {
     mcp: env.CLAUDE_BRAINSTORM_MCP === '0' ? undefined : { url, token, dir: path.resolve(env.CLAUDE_MCP_DIR || path.join(os.homedir(), '.cache', 'brainstorm', 'mcp')) },
   });
   const worker = new BrainstormWorker({
+    rules: 'runner', // 고정 규약은 실행기가 싣는다(마스터 #1919)
     url,
     token,
     worker: env.BRAINSTORM_WORKER || os.hostname(),

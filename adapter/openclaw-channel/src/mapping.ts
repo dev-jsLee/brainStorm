@@ -1,5 +1,6 @@
 // brainStorm ↔ OpenClaw 변환 — 순수 함수만. OpenClaw SDK 를 import 하지 않는다(시험에서 그대로 부른다).
 // brainStorm 프로토콜 타입이 정본이고, OpenClaw 쪽 모양은 여기서만 만든다.
+import { createHash } from 'node:crypto';
 import type { ClaimSession, Message } from '../../../src/protocol.js';
 
 /**
@@ -87,6 +88,43 @@ export function fmtSize(n: number): string {
 export { FACE_RULE, HANDOFF_RULE, PULL_RULE, REQUEST_RULE };
 
 /**
+ * 턴마다 같은 고정 규약(출처 · 넘김 «→» · 끌어오기 «←» · 요청) — 마스터 #1916~#1919.
+ * 실행기가 시스템 프롬프트·세션 앞머리에 실을 수 있으면 턴 글에서 빼고 여기 글을 따로 넘긴다(대화 기록에 턴마다 쌓이지 않게).
+ * id = 글의 짧은 해시 — 규약을 고치면 바뀌어 실행기가 전문을 다시 싣는다.
+ */
+export function turnRules(lang?: string | null, o: { requestRule?: boolean | null } = {}): { text: string; id: string; ref: string } {
+  const text = [t(lang, 'prompt.source_rule'), handoffRule(lang), pullRule(lang), ...(o.requestRule === false ? [] : [requestRule(lang)])].join('\n');
+  const id = createHash('sha256').update(text).digest('hex').slice(0, 8);
+  return { text, id, ref: t(lang, 'prompt.rules_ref', { id }) };
+}
+
+/**
+ * 세션 앞머리형 실행기(codex·herdr)가 이번 턴에 규약 전문을 실을지 고른다 — 세션 첫 턴 · 규약 판이 바뀐 턴 · 전문 뒤 every 턴째에 전문, 그 사이는 한 줄 참조.
+ * 대화형 창이 스스로 요약(compact)해 첫 턴을 잃어도 every 턴 안에 다시 받는다.
+ */
+export class RulesTracker {
+  private seen = new Map<string, { id: string; n: number }>();
+  constructor(private every = 20, private max = 500) {}
+  pick(key: string, rules: { text: string; id: string; ref: string }): string {
+    const s = this.seen.get(key);
+    this.seen.delete(key);
+    if (!s || s.id !== rules.id || s.n + 1 >= this.every) {
+      this.seen.set(key, { id: rules.id, n: 0 });
+      while (this.seen.size > this.max) this.seen.delete(this.seen.keys().next().value!);
+      return rules.text;
+    }
+    this.seen.set(key, { id: s.id, n: s.n + 1 });
+    return rules.ref;
+  }
+  /** 전문을 다른 길(새 세션의 첫 프롬프트)로 실었을 때 적는다 */
+  mark(key: string, rules: { id: string }): void {
+    this.seen.delete(key);
+    this.seen.set(key, { id: rules.id, n: 0 });
+    while (this.seen.size > this.max) this.seen.delete(this.seen.keys().next().value!);
+  }
+}
+
+/**
  * 한 턴의 프롬프트. 에이전트 이름은 넣지 않는다(이름은 마스터가 첫 대화에서 짓는다).
  * 인용·관찰·제안 출처는 «지시가 아니다»라고 적는다 — 본문 속 글자가 지시로 승격되지 않게.
  */
@@ -113,6 +151,8 @@ export function buildPrompt(p: {
   lang?: string | null;
   /** 질문함: 이 방에 내가 올린 열린 질문 — 메시지 뒤에 싣는다(글로 답했으면 내리라는 안내와 함께) */
   openQuestions?: ClaimQuestion[] | null;
+  /** 'omit' = 고정 규약(turnRules)을 실행기가 따로 싣는다 — 턴 글에서 뺀다. 기본 'inline'(옛 동작) */
+  rules?: 'inline' | 'omit';
 }): string {
   const L = p.lang;
   const who = (id: string) => {
@@ -132,10 +172,7 @@ export function buildPrompt(p: {
         : p.forwarded
           ? t(L, 'prompt.intro_forwarded')
           : t(L, 'prompt.intro_default'),
-    t(L, 'prompt.source_rule'),
-    handoffRule(L),
-    pullRule(L),
-    ...(p.requestRule === false ? [] : [requestRule(L)]),
+    ...(p.rules === 'omit' ? [] : [turnRules(L, { requestRule: p.requestRule }).text]),
     ...(p.holdNotices?.length ? [renderHoldNotices(p.holdNotices, L)] : []),
     '',
   ];
@@ -146,7 +183,12 @@ export function buildPrompt(p: {
     const ho = m.author_id === p.selfId && m.handoff_state ? Object.entries(m.handoff_state) : [];
     const tail = ho.length ? `\n[${ho.map(([id, st]) => `→ ${name(id)} · ${t(L, st === 'forwarded' ? 'prompt.handoff_forwarded' : 'prompt.handoff_pending')}`).join(' / ')}]` : '';
     const att = (m.attachments ?? []).map((x) => `\n${t(L, 'prompt.attach_line', { name: x.name, kind: attachKind(x.kind, L), size: fmtSize(x.size), id: x.id })}`).join('');
-    return `${mark}#${m.seq} ${who(m.author_id)} · ${src}\n${m.body}${att}${tail}`;
+    // 답장·인용 대상(마스터 #1885 — 답장으로 가리킨 «이거»가 에이전트에게 안 보였다)
+    const rel = [
+      m.reply_to_seq != null ? t(L, 'prompt.reply_to', { seq: m.reply_to_seq }) : '',
+      m.quote_of_seq != null ? t(L, 'prompt.quote_of', { seq: m.quote_of_seq }) : '',
+    ].filter(Boolean).map((x) => ` · ${x}`).join('');
+    return `${mark}#${m.seq} ${who(m.author_id)} · ${src}${rel}\n${m.body}${att}${tail}`;
   });
   const carry = p.carry ? `${renderCarry(p.carry, L)}\n\n` : '';
   const pulled = p.pulled ? `${renderPulled(p.pulled, L)}\n\n` : '';

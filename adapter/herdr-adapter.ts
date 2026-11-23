@@ -75,6 +75,7 @@ async function main(): Promise<number> {
   const where = `${env.HERDR_SESSION}/${env.HERDR_PANE || `«${env.HERDR_PANE_TITLE}»`}`;
   let lastReady: boolean | null = null;
   const worker = new BrainstormWorker({
+    rules: 'runner', // 고정 규약은 실행기가 싣는다(마스터 #1919)
     url,
     token,
     worker: env.BRAINSTORM_WORKER || os.hostname(),

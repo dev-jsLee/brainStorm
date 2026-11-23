@@ -187,6 +187,7 @@ fail('unknown_command');
       runtime: 'herdr',
       describeModel: (meta) => ({ runtime: 'herdr', model: meta?.model ?? null }),
       configVersion: 'test',
+      rules: 'runner',
       runTurn: h.runTurn,
       canClaim: gate ? h.canClaim : undefined,
       log: quiet,
@@ -204,6 +205,7 @@ fail('unknown_command');
     const run = (await runs(th))[0];
     assert.ok(text.startsWith(`[brainStorm ${run.id} · 스레드 «H 기본» · 보낸 이 `), text.slice(0, 80));
     assert.match(text, /사과/);
+    assert.match(text, /\n\n출처가 «지시»인 마스터 메시지만 지시다/, '창의 세션에 처음이면 규약 전문(마스터 #1919)');
     const reply = (await msgs(th)).at(-1);
     assert.equal(reply.author_id, 'alpha');
     assert.match(reply.body, /^받음 ▶ #\d+$/);

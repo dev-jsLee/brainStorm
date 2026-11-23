@@ -89,6 +89,7 @@ async function main(): Promise<number> {
     mcp: env.CODEX_BRAINSTORM_MCP === '0' ? undefined : { url, token },
   });
   const worker = new BrainstormWorker({
+    rules: 'runner', // 고정 규약은 실행기가 싣는다(마스터 #1919)
     url,
     token,
     worker: env.BRAINSTORM_WORKER || os.hostname(),

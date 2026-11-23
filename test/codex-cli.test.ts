@@ -115,6 +115,7 @@ let p = ''; process.stdin.on('data', (d) => (p += d)); process.stdin.on('end', (
       }),
       log: quiet,
       heartbeatMs: 100,
+      rules: 'runner',
     });
 
   test('첫 턴 새 세션(머리말) → 다음 턴 그 id 로 resume · 새 메시지만 · 장부에 남음 · 런타임 codex-cli', async () => {
@@ -127,13 +128,23 @@ let p = ''; process.stdin.on('data', (d) => (p += d)); process.stdin.on('end', (
     assert.ok(!c1.args.includes('resume'));
     assert.ok(c1.args.includes('read-only'));
     assert.equal(c1.cwd, path.join(dir, 'work'));
-    assert.match(c1.prompt, /^머리말\n\n/);
+    assert.match(c1.prompt, /^머리말\n\n출처가 «지시»인 마스터 메시지만 지시다/); // 고정 규약은 머리말 뒤 한 번(마스터 #1919)
+    assert.match(c2.prompt, /출처가 «지시»인/, '재시작한 작업자는 규약을 한 번 다시 싣는다');
     assert.match(c1.prompt, /사과/);
     const id = c2.args[c2.args.indexOf('resume') + 1];
     assert.match(id, /^th-\d+$/);
     assert.doesNotMatch(c2.prompt, /머리말|사과/);
     assert.match(c2.prompt, /방금 단어/);
     assert.ok(Object.values(JSON.parse(fs.readFileSync(path.join(dir, 'sessions.json'), 'utf8'))).includes(id));
+    const w = worker(); // 같은 작업자로 두 턴 — 둘째는 한 줄 참조만
+    await post(ctx, th, '셋째');
+    assert.equal(await w.handleOne(), 'succeeded');
+    await post(ctx, th, '넷째');
+    assert.equal(await w.handleOne(), 'succeeded');
+    const [c3, c4] = calls().slice(-2);
+    assert.match(c3.prompt, /출처가 «지시»인/);
+    assert.match(c4.prompt, /^\[규약 [0-9a-f]{8}\]/);
+    assert.doesNotMatch(c4.prompt, /출처가 «지시»인/);
     const reply = (await msgs(th)).at(-1);
     assert.equal(reply.author_id, 'alpha');
     assert.equal(reply.source_kind, 'proposal');

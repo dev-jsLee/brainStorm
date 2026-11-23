@@ -13,6 +13,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { progressOf, sessionFile, stageAttachments } from '../claude-cli/runner.js';
 import type { RunTurn, TurnRequest, TurnResult } from '../openclaw-channel/src/worker.js';
+import { RulesTracker } from '../openclaw-channel/src/mapping.js';
 
 export interface HerdrRunnerOptions {
   /** herdr 실행 파일 */
@@ -244,6 +245,7 @@ export interface HerdrRunner {
 }
 
 export function makeHerdrRunner(o: HerdrRunnerOptions): HerdrRunner {
+  const rulesTracker = new RulesTracker();
   const poll = o.pollMs ?? 1000;
   const target = async (): Promise<string> => {
     if (o.pane) return o.pane;
@@ -278,7 +280,9 @@ export function makeHerdrRunner(o: HerdrRunnerOptions): HerdrRunner {
 
     // 3. 주입
     let extra = o.attachDir ? await stageAttachments(req, o.attachDir) : '';
-    let text = `${headOf(req)}\n\n${req.prompt}${extra}`;
+    // 고정 규약(마스터 #1919): 이 창의 Claude 세션에 처음·규약이 바뀐 턴·20턴마다 전문, 그 사이는 한 줄 참조
+    const rules = req.rules ? `${rulesTracker.pick(uuid, req.rules)}\n\n` : '';
+    let text = `${headOf(req)}\n\n${rules}${req.prompt}${extra}`;
     if (Buffer.byteLength(text) > (o.spoolBytes ?? 64 * 1024)) {
       fs.mkdirSync(o.spoolDir, { recursive: true, mode: 0o700 });
       const f = path.join(o.spoolDir, `${req.runId.replace(/[^A-Za-z0-9_-]/g, '_')}.md`);

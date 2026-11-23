@@ -12,7 +12,7 @@
 //   - 토큰·본문은 로그에 남기지 않는다(식별자만).
 import type { AttachmentInfo, ClaimCarry, ClaimFace, ClaimForward, ClaimHoldNotice, ClaimPulled, ClaimQuestion, ClaimSession, Message, Participant, Run } from '../../../src/protocol.js';
 import { t } from '../../../src/i18n.js';
-import { buildPrompt, describeActualModel, redact, selectNewContext, sessionKeyFor, stripAnswerStamp } from './mapping.js';
+import { buildPrompt, describeActualModel, turnRules, redact, selectNewContext, sessionKeyFor, stripAnswerStamp } from './mapping.js';
 
 export interface TurnRequest {
   sessionKey: string;
@@ -36,6 +36,8 @@ export interface TurnRequest {
   lang?: string;
   /** 마스터가 brainStorm 에서 정한 모델(claim.model · 2026-11-04) — 있으면 실행기 설정(env)보다 먼저. 없으면 실행기 기본값 */
   model?: string;
+  /** 작업자 rules:'runner' 일 때만 — 턴 글에서 뺀 고정 규약(마스터 #1919). 실행기가 시스템 프롬프트·세션 앞머리에 싣는다 */
+  rules?: { text: string; id: string; ref: string };
 }
 
 export type TurnAttachment = AttachmentInfo & { seq: number };
@@ -80,6 +82,11 @@ export interface WorkerOptions {
   /** 시험용: 턴이 끝난 뒤(LLM 호출 뒤) 답을 올리기 전에 부른다 */
   beforeComplete?: (runId: string) => Promise<void> | void;
   fetchImpl?: typeof fetch;
+  /**
+   * 고정 규약(출처·→·←·요청)을 어디에 싣나(마스터 #1916~#1919). 'inline'(기본) = 턴 글 머리마다 ·
+   * 'runner' = 턴 글에서 빼고 TurnRequest.rules 로 넘긴다 — 실행기가 반드시 싣는다(claude-cli 시스템 프롬프트 · codex·herdr 세션 앞머리)
+   */
+  rules?: 'inline' | 'runner';
 }
 
 interface Claim {
@@ -345,7 +352,9 @@ export class BrainstormWorker {
         face: claim.face ?? null,
         lang: claim.lang ?? null,
         openQuestions: claim.open_questions ?? null,
+        rules: this.o.rules === 'runner' ? 'omit' : 'inline',
       });
+      const rules = this.o.rules === 'runner' ? turnRules(claim.lang ?? null, { requestRule: claim.request_rule ?? null }) : undefined;
       const author = this.participants.get(claim.trigger.author_id);
       const started = Date.now();
       let result: TurnResult;
@@ -363,6 +372,7 @@ export class BrainstormWorker {
           attachments: newMessages.flatMap((m) => (m.attachments ?? []).map((a) => ({ ...a, seq: m.seq }))),
           fetchAttachment: (id, signal) => this.client.download(id, signal),
           lang: claim.lang,
+          rules,
           model: claim.model ?? undefined,
           onProgress: (note) => {
             const n = note.replace(/\s+/g, ' ').trim().slice(0, 300);
