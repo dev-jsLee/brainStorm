@@ -207,6 +207,7 @@ function toThread(r: Row): Thread {
     updated_at: r.updated_at,
     last_seq: r.last_seq ?? null,
     mode: r.mode === 'face' ? 'face' : 'chat',
+    pinned_tag_id: r.pinned_tag_id ?? null,
   };
 }
 
@@ -453,10 +454,10 @@ function inertForwardHeads(body: string): string {
   return body;
 }
 
-/** 차선(마스터 #1563) — 글(seq = ?)의 첫 주 태그 id, 없으면 ''. 파서가 머리 순서대로 넣으므로 rowid 가 곧 순서 */
+/** 차선(마스터 #1563) — 글(seq = ?)의 첫 주제 태그 id(메타 태그는 차선이 안 된다 · 마이그레이션 22 · 마스터 #1933), 없으면 ''. 파서가 머리 순서대로 넣으므로 rowid 가 곧 순서 */
 // 휴지통에 든 태그는 차선이 되지 않는다(마이그레이션 21) — 그 태그가 붙은 옛 글의 새 전달은 다음 주 태그 또는 기본 차선으로. 이미 도는 실행은 제 lane 을 그대로 쥔다
 const LANE_SQL =
-  "SELECT COALESCE((SELECT lmt.tag_id FROM message_tags lmt JOIN tags ltg ON ltg.id = lmt.tag_id WHERE lmt.message_seq = ? AND lmt.role = 'primary' AND ltg.deleted_at IS NULL ORDER BY lmt.rowid LIMIT 1), '') AS lane";
+  "SELECT COALESCE((SELECT lmt.tag_id FROM message_tags lmt JOIN tags ltg ON ltg.id = lmt.tag_id WHERE lmt.message_seq = ? AND lmt.role = 'primary' AND ltg.deleted_at IS NULL AND ltg.kind = 'topic' ORDER BY lmt.rowid LIMIT 1), '') AS lane";
 
 export class Store {
   readonly events = new EventEmitter();
@@ -1259,7 +1260,7 @@ export class Store {
 
   createThread(
     pr: Principal,
-    input: { title?: unknown; default_recipient?: unknown; members?: unknown; kind?: unknown; client_key?: unknown },
+    input: { title?: unknown; default_recipient?: unknown; members?: unknown; kind?: unknown; client_key?: unknown; pinned_tag_id?: unknown },
   ): { thread: Thread; duplicate: boolean } {
     this.requireMaster(pr, 'thread.create');
     // 메인 채팅방은 하나뿐이고 서버가 만든다 — API 로 방을 더 만들 수 없다
@@ -1284,6 +1285,8 @@ export class Store {
       members.add(p.id);
     }
     members.add(pr.participant.id);
+    // 고정 태그(마이그레이션 22 · 마스터 #1937 «#B 스레드로 이어 가기») — 주제 태그만
+    const pin = input.pinned_tag_id === undefined || input.pinned_tag_id === null || input.pinned_tag_id === '' ? null : this.tags.pinnable(input.pinned_tag_id);
     const id = newId('th');
     const t = now();
     const dup = this.db.transaction(() => {
@@ -1293,11 +1296,11 @@ export class Store {
         return ex.id as string;
       }
       this.db
-        .prepare('INSERT INTO threads(id, title, default_recipient, created_by, created_at, updated_at, client_key) VALUES (?,?,?,?,?,?,?)')
-        .run(id, title, dr, pr.participant.id, t, t, ckey);
+        .prepare('INSERT INTO threads(id, title, default_recipient, created_by, created_at, updated_at, client_key, pinned_tag_id) VALUES (?,?,?,?,?,?,?,?)')
+        .run(id, title, dr, pr.participant.id, t, t, ckey, pin);
       this.insertMembers(id, members, t);
       // 스레드 생성도 열람·게시 권한 부여다 — 누가 멤버가 됐는지 남긴다
-      this.audit({ actor: this.actorOf(pr), action: 'thread.create', target_type: 'thread', target_id: id, thread_id: id, result: 'ok', after: { members: [...members], default_recipient: dr } });
+      this.audit({ actor: this.actorOf(pr), action: 'thread.create', target_type: 'thread', target_id: id, thread_id: id, result: 'ok', after: { members: [...members], default_recipient: dr, ...(pin ? { pinned_tag_id: pin } : {}) } });
       return null;
     })();
     if (dup) return { thread: this.getThread(pr, dup).thread, duplicate: true };
@@ -1798,7 +1801,7 @@ export class Store {
       .get(threadId, agentId, lane) as Row | undefined;
   }
 
-  /** 차선(마스터 #1563): 글의 첫 주 태그 id — 없으면 '' (기본 차선). claim 의 SQL 식과 같은 규칙 */
+  /** 차선(마스터 #1563): 글의 첫 주제 태그 id(메타 뺌 · 마이그레이션 22) — 없으면 '' (기본 차선). claim 의 SQL 식과 같은 규칙 */
   private laneOf(seq: number): string {
     const r = this.db.prepare(LANE_SQL).get(seq) as Row | undefined;
     return (r?.lane as string) ?? '';
@@ -3124,6 +3127,37 @@ export class Store {
     })();
     if (changed) this.emit({ notice: { t: 'thread', thread_id: threadId }, threadId });
     return { ok: true, changed, thread: toThread({ ...th, title: next }) };
+  }
+
+  /**
+   * 스레드 고정 태그(마스터만 · 마이그레이션 22 · 마스터 #1937): 이 스레드에 저장되는 모든 글의 주 태그 첫 자리를 이 태그로 둔다.
+   * `tag_id: null` 이면 푼다. 주제 태그만(메타·보관·휴지통 400) · 메인 채팅방 409 room_locked · 휴지통 스레드 409.
+   * 이미 올린 글의 태그는 그대로다(범위 밖).
+   */
+  pinThreadTag(pr: Principal, threadId: string, tagId: unknown) {
+    this.requireMaster(pr, 'thread.pin_tag', { target_type: 'thread', target_id: threadId, thread_id: threadId });
+    const th = this.requireThread(threadId);
+    if (th.kind === 'room') throw new ApiError(409, 'room_locked', '메인 채팅방은 태그를 고정할 수 없다');
+    if (th.deleted_at) throw new ApiError(409, 'thread_deleted', '휴지통에 있는 스레드는 복구만 된다', undefined, { key: 'err.thread_deleted.restore_only' });
+    const next = tagId === undefined || tagId === null || tagId === '' ? null : this.tags.pinnable(tagId);
+    const before = (th.pinned_tag_id as string) ?? null;
+    const changed = next !== before;
+    this.db.transaction(() => {
+      if (changed) this.db.prepare('UPDATE threads SET pinned_tag_id = ? WHERE id = ?').run(next, threadId);
+      this.audit({
+        actor: this.actorOf(pr),
+        action: 'thread.pin_tag',
+        target_type: 'thread',
+        target_id: threadId,
+        thread_id: threadId,
+        result: changed ? 'ok' : 'noop',
+        reason: changed ? null : 'unchanged',
+        before: { pinned_tag_id: before },
+        after: { pinned_tag_id: next },
+      });
+    })();
+    if (changed) this.emit({ notice: { t: 'thread', thread_id: threadId }, threadId });
+    return { ok: true, changed, thread: toThread({ ...th, pinned_tag_id: next }) };
   }
 
   /**

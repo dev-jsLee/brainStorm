@@ -2,7 +2,7 @@
 // 마이그레이션 19 의 tags 표. 만들기·이름 바꾸기·담당자·보관·되살리기는 마스터만, 목록은 인증된 누구나.
 // 대표 에이전트는 meta 'default_agent' — 루트와 담당자 없는 태그의 기본 수신자. 담당자 NULL = 대표를 따른다(덮어쓰기 모형).
 import { newId } from './crypto.js';
-import type { Message, MessageTags } from './protocol.js';
+import type { Message, MessageTags, TagKind } from './protocol.js';
 import { ApiError, now, reqString, toMessage, type Principal, type Row, type Store } from './store.js';
 import { parseTags } from './tags.js';
 
@@ -13,6 +13,8 @@ const LAST_CALLED = `(SELECT MAX(m.created_at) FROM message_tags mt JOIN message
 export interface Tag {
   id: string;
   name: string;
+  /** 종류(마이그레이션 22 · 마스터 #1933) — 'topic' 주제 · 'meta' 메타(주 태그 첫 자리·차선·답장 상속이 안 됨) */
+  kind: TagKind;
   /** 담당자(NULL 이면 대표 에이전트) */
   owner_id: string | null;
   /** 지금 이 태그의 수신자 — owner_id ?? 대표 에이전트(없으면 null) */
@@ -61,6 +63,7 @@ export class TagStore {
     return {
       id: r.id as string,
       name: r.name as string,
+      kind: r.kind === 'meta' ? 'meta' : 'topic',
       owner_id: (r.owner_id as string) ?? null,
       recipient_id: ((r.owner_id as string) ?? def) ?? null,
       created_by: r.created_by as string,
@@ -135,8 +138,12 @@ export class TagStore {
     return tag;
   }
 
-  /** 고치기 — 이름·담당자(`owner_id: null` 이면 대표를 따름)·보관(`archived: true|false`)·숨김(`hidden: true|false`). 마스터만 · 휴지통 것은 409 */
-  update(pr: Principal, id: string, input: { name?: unknown; owner_id?: unknown; archived?: unknown; hidden?: unknown }): Tag {
+  /**
+   * 고치기 — 이름·담당자(`owner_id: null` 이면 대표를 따름)·보관(`archived: true|false`)·숨김(`hidden: true|false`)·
+   * 종류(`kind: 'topic'|'meta'` · 마이그레이션 22 · 마스터 #1933). 마스터만 · 휴지통 것은 409 ·
+   * 어느 스레드가 고정한 태그를 메타로 바꾸면 409 tag_pinned(고정을 먼저 푼다).
+   */
+  update(pr: Principal, id: string, input: { name?: unknown; owner_id?: unknown; archived?: unknown; hidden?: unknown; kind?: unknown }): Tag {
     this.s.requireMaster(pr, 'tag.update', { target_type: 'tag', target_id: id });
     const cur = this.get(id);
     if (!cur) throw new ApiError(404, 'not_found');
@@ -172,6 +179,16 @@ export class TagStore {
       vals.push(at);
       after.hidden_at = at;
     }
+    if (input.kind !== undefined) {
+      if (input.kind !== 'topic' && input.kind !== 'meta') throw new ApiError(400, 'bad_tag_kind', "kind must be 'topic' or 'meta'");
+      if (input.kind === 'meta' && cur.kind !== 'meta') {
+        const pin = this.s.db.prepare('SELECT id FROM threads WHERE pinned_tag_id = ? LIMIT 1').get(id) as Row | undefined;
+        if (pin) throw new ApiError(409, 'tag_pinned', 'a thread pins this tag — unpin it first', { thread_id: pin.id });
+      }
+      sets.push('kind = ?');
+      vals.push(input.kind);
+      after.kind = input.kind;
+    }
     if (sets.length === 0) throw new ApiError(400, 'bad_request', 'nothing to update');
     const t = now();
     this.s.db.prepare(`UPDATE tags SET ${sets.join(', ')}, updated_at = ? WHERE id = ?`).run(...vals, t, id);
@@ -184,7 +201,7 @@ export class TagStore {
       target_id: id,
       result: changed ? 'ok' : 'noop',
       reason: changed ? null : 'unchanged',
-      before: { name: cur.name, owner_id: cur.owner_id, archived_at: cur.archived_at, hidden_at: cur.hidden_at },
+      before: { name: cur.name, owner_id: cur.owner_id, archived_at: cur.archived_at, hidden_at: cur.hidden_at, kind: cur.kind },
       after,
     });
     if (changed) this.s.emit({ notice: { t: 'tag', tag_id: id }, threadId: null });
@@ -228,6 +245,7 @@ export class TagStore {
     if (!cur.deleted_at) throw new ApiError(409, 'not_in_trash');
     const out = this.s.db.transaction(() => {
       const links = this.s.db.prepare('DELETE FROM message_tags WHERE tag_id = ?').run(id).changes;
+      this.s.db.prepare('UPDATE threads SET pinned_tag_id = NULL WHERE pinned_tag_id = ?').run(id); // 고정(마이그레이션 22)도 푼다
       const t = now();
       const retired = this.s.db
         .prepare(
@@ -279,27 +297,77 @@ export class TagStore {
       const id = alive.get(n)!;
       if (!primary.includes(id)) primary.push(id);
     }
-    if (primary.length === 0 && parsed.line === null) for (const id of inherit) if (!primary.includes(id) && [...alive.values()].includes(id)) primary.push(id);
+    // 상속(에이전트 답 · 태그 줄 없을 때)은 주제 태그만(마스터 #1935) — 메타 태그는 그 글이 직접 준 것만
+    if (primary.length === 0 && parsed.line === null) {
+      const topics = this.topicIds();
+      for (const id of inherit) if (!primary.includes(id) && topics.has(id)) primary.push(id);
+    }
     const inline = parsed.inline.map((n) => alive.get(n)!).filter((id) => !primary.includes(id));
     return { primary, inline };
   }
 
-  /** 트랜잭션 안에서 — 글에 태그 줄을 쓴다 */
-  attach(seq: number, t: { primary: string[]; inline: string[] }): void {
-    const ins = this.s.db.prepare('INSERT OR IGNORE INTO message_tags(message_seq, tag_id, role) VALUES (?,?,?)');
-    for (const id of t.primary) ins.run(seq, id, 'primary');
-    for (const id of t.inline) ins.run(seq, id, 'inline');
+  /** 주제 태그 id 집합(휴지통 뺌 — 보관·숨김은 호출자가 거른다) */
+  private topicIds(): Set<string> {
+    return new Set((this.s.db.prepare("SELECT id FROM tags WHERE kind = 'topic' AND deleted_at IS NULL").all() as Row[]).map((r) => r.id as string));
   }
 
   /**
-   * 답장은 원문의 주 태그를 전부 따라간다(마스터 #1795) — 원문 순서를 앞에(메인 태그 유지) · 보기·태그 줄로 더 붙인 것은 뒤에 ·
-   * 보관·휴지통·숨긴 원문 태그는 건너뛴다(숨김은 마이그레이션 21 — 답장 상속에서 빠짐) · 주 태그가 된 것은 인라인에서 뺀다.
+   * 스레드 고정 태그(마이그레이션 22 · 마스터 #1937) — 살아 있는 주제 태그일 때만 id(보관·휴지통이 되거나 메타로 바뀌면 강제가 멈춘다).
+   * 메인 채팅방은 고정이 없다.
+   */
+  pinnedOf(threadId: string): string | null {
+    const r = this.s.db
+      .prepare(
+        `SELECT t.id FROM threads th JOIN tags t ON t.id = th.pinned_tag_id
+         WHERE th.id = ? AND th.kind <> 'room' AND t.kind = 'topic' AND t.archived_at IS NULL AND t.deleted_at IS NULL`,
+      )
+      .get(threadId) as Row | undefined;
+    return (r?.id as string) ?? null;
+  }
+
+  /** 고정할 수 있는 태그인가 — 없으면 400 unknown_tag · 메타 400 tag_meta · 보관 400 tag_archived · 휴지통 400 tag_in_trash */
+  pinnable(v: unknown): string {
+    if (typeof v !== 'string' || !v) throw new ApiError(400, 'bad_request', 'tag_id must be a tag id or null');
+    const r = this.s.db.prepare('SELECT id, kind, archived_at, deleted_at FROM tags WHERE id = ? OR name = ?').get(v, v.replace(/^#/, '')) as Row | undefined;
+    if (!r) throw new ApiError(400, 'unknown_tag', `tag ${v} is not registered`);
+    if (r.deleted_at) throw new ApiError(400, 'tag_in_trash');
+    if (r.archived_at) throw new ApiError(400, 'tag_archived', `tag ${v} is archived`);
+    if (r.kind !== 'topic') throw new ApiError(400, 'tag_meta', 'only a topic tag can be pinned');
+    return r.id as string;
+  }
+
+  /**
+   * 트랜잭션 안에서 — 글에 태그 줄을 쓴다. 글 저장 경로가 모두 여기를 지난다(사람·에이전트·MCP·요청 · 대면·합침 포함).
+   * 주 태그 순서(마스터 #1933·#1937): [스레드 고정 태그] → 주제 태그(준 순서) → 메타 태그(준 순서) — 메타는 첫 자리가 될 수 없다.
+   * 고정 태그는 글이 안 줬어도 첫 자리에 넣고, 인라인에 있었으면 거기서 뺀다.
+   */
+  attach(seq: number, t: { primary: string[]; inline: string[] }): void {
+    const th = this.s.db.prepare('SELECT thread_id FROM messages WHERE seq = ?').get(seq) as Row | undefined;
+    const pin = th ? this.pinnedOf(th.thread_id as string) : null;
+    const topics = this.topicIds();
+    const given = pin ? [pin, ...t.primary.filter((id) => id !== pin)] : t.primary;
+    const primary = [...given.filter((id) => topics.has(id)), ...given.filter((id) => !topics.has(id))];
+    const ins = this.s.db.prepare('INSERT OR IGNORE INTO message_tags(message_seq, tag_id, role) VALUES (?,?,?)');
+    for (const id of primary) ins.run(seq, id, 'primary');
+    for (const id of t.inline) if (!primary.includes(id)) ins.run(seq, id, 'inline');
+  }
+
+  /**
+   * 답장 상속(마스터 #1935 — #1795 «원문 태그를 전부 따라간다»를 바꿈):
+   * 원문에서 이어받는 것은 **주제 태그만**(보관·휴지통·숨김 뺌 · 원문 순서). 이 글이 주제 태그를 직접 줬으면(보기 태그·첫 줄 태그 줄)
+   * 그것이 원문 주제 태그를 **대신한다**(쌓지 않음). 메타 태그는 이 글이 직접 준 것만. 주 태그가 된 것은 인라인에서 뺀다.
    */
   inheritReply(t: { primary: string[]; inline: string[] }, replyTo: number): { primary: string[]; inline: string[] } {
-    const hidden = new Set((this.s.db.prepare('SELECT id FROM tags WHERE hidden_at IS NOT NULL').all() as Row[]).map((r) => r.id as string));
-    const alive = new Set([...this.aliveByName().values()].filter((id) => !hidden.has(id)));
-    const from = this.primaryOf(replyTo).filter((id) => alive.has(id));
-    const primary = [...from, ...t.primary.filter((id) => !from.includes(id))];
+    const topics = this.topicIds();
+    const givenTopics = t.primary.filter((id) => topics.has(id));
+    const metas = t.primary.filter((id) => !topics.has(id));
+    let lead = givenTopics;
+    if (!givenTopics.length) {
+      const hidden = new Set((this.s.db.prepare('SELECT id FROM tags WHERE hidden_at IS NOT NULL').all() as Row[]).map((r) => r.id as string));
+      const alive = new Set([...this.aliveByName().values()].filter((id) => !hidden.has(id) && topics.has(id)));
+      lead = this.primaryOf(replyTo).filter((id) => alive.has(id));
+    }
+    const primary = [...lead, ...metas.filter((id) => !lead.includes(id))];
     return { primary, inline: t.inline.filter((id) => !primary.includes(id)) };
   }
 
@@ -313,13 +381,15 @@ export class TagStore {
     if (seqs.length === 0) return map;
     const rows = this.s.db
       // 휴지통 태그는 글 칩에서 뺀다(연결은 지킴 · 되살리면 다시 보임)
-      .prepare(`SELECT mt.message_seq, mt.role, t.id, t.name FROM message_tags mt JOIN tags t ON t.id = mt.tag_id WHERE mt.message_seq IN (${seqs.map(() => '?').join(',')}) AND t.deleted_at IS NULL ORDER BY mt.rowid`)
+      .prepare(`SELECT mt.message_seq, mt.role, t.id, t.name, t.kind FROM message_tags mt JOIN tags t ON t.id = mt.tag_id WHERE mt.message_seq IN (${seqs.map(() => '?').join(',')}) AND t.deleted_at IS NULL ORDER BY mt.rowid`)
       .all(...seqs) as Row[];
     for (const r of rows) {
       const cur = map.get(r.message_seq as number) ?? { primary: [], inline: [] };
-      (r.role === 'primary' ? cur.primary : cur.inline).push({ id: r.id as string, name: r.name as string });
+      (r.role === 'primary' ? cur.primary : cur.inline).push({ id: r.id as string, name: r.name as string, kind: r.kind === 'meta' ? 'meta' : 'topic' });
       map.set(r.message_seq as number, cur);
     }
+    // 주제 태그가 언제나 메타 태그보다 앞(마스터 #1933) — 이 판 전에 저장된 글도 보이는 순서는 맞춘다(안정 정렬)
+    for (const v of map.values()) v.primary.sort((a, b) => (a.kind === 'meta' ? 1 : 0) - (b.kind === 'meta' ? 1 : 0));
     return map;
   }
 

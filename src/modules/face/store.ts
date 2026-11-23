@@ -130,6 +130,7 @@ export class FaceStore {
         )
         .run(newId('msg'), r.thread_id, me, `run:${r.id}`, body, r.trigger_seq, sk, trig.hop + 1, r.id, t);
       const seq = Number(info.lastInsertRowid);
+      this.s.tags.attach(seq, { primary: [], inline: [] }); // 스레드 고정 태그(마이그레이션 22 · #1937) — 글 저장 경로 한 곳
       this.s.db
         .prepare("UPDATE runs SET state = 'succeeded', ended_at = ?, finalized_at = ?, usage = ?, result_seq = ?, lease_expires_at = NULL WHERE id = ?")
         .run(t, t, usage, seq, r.id);
@@ -443,6 +444,7 @@ export class FaceStore {
         )
         .run(newId('msg'), r.thread_id, me, `face-retry:${roundId}:${t}`, tr(this.s.lang(), 'srv.face.retry', { turn: (r.turn as number) + 1, name: this.s.nameOf(next) }), JSON.stringify([next]), t);
       const seq = Number(info.lastInsertRowid);
+      this.s.tags.attach(seq, { primary: [], inline: [] }); // 스레드 고정 태그(#1937)
       this.s.db
         .prepare(`INSERT INTO deliveries(id, message_seq, thread_id, recipient_id, status, attempts, created_at, updated_at) VALUES (?,?,?,?, 'pending', 0, ?, ?)`)
         .run(newId('dlv'), seq, r.thread_id, next, t, t);

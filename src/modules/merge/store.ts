@@ -98,6 +98,7 @@ export class MergeStore {
         )
         .run(newId('msg'), parent.id, me, `merge:${childId}:${to}`, body, t);
       const seq = Number(info.lastInsertRowid);
+      this.s.tags.attach(seq, { primary: [], inline: [] }); // 상위 스레드 고정 태그(마이그레이션 22 · #1937)
       this.s.db
         .prepare('INSERT INTO thread_merges(message_seq, child_thread_id, parent_thread_id, from_seq, to_seq, count, created_by, created_at) VALUES (?,?,?,?,?,?,?,?)')
         .run(seq, childId, parent.id, from, to, rows.length, me, t);

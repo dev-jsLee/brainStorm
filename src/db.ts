@@ -529,6 +529,15 @@ const MIGRATIONS: Migration[] = [
   ALTER TABLE tags ADD COLUMN hidden_at INTEGER;
   ALTER TABLE tags ADD COLUMN deleted_at INTEGER;
   `,
+  // 22 — 태그 종류 · 스레드 고정 태그(2026-11-23 마스터 #1933·#1935·#1937):
+  //     tags.kind = 'topic'(주제 태그 · 기본) | 'meta'(메타 태그 · 횡단 관심사) — 메타는 주 태그 첫 자리·차선·답장 상속이 되지 않는다.
+  //     옛 태그 중 이름이 아래 열둘이면 meta, 나머지는 topic. threads.pinned_tag_id = 그 스레드 글의 주 태그 첫 자리(주제 태그만 · NULL = 고정 없음).
+  //     FK 는 걸지 않는다 — 태그 영구 삭제가 고정을 먼저 푼다(TagStore.purge).
+  `
+  ALTER TABLE tags ADD COLUMN kind TEXT NOT NULL DEFAULT 'topic' CHECK (kind IN ('topic','meta'));
+  UPDATE tags SET kind = 'meta' WHERE name IN ('개선안','버그','보고','피드백','결정','개발','기획','질문','제안','회고','정정','요청');
+  ALTER TABLE threads ADD COLUMN pinned_tag_id TEXT;
+  `,
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.length;

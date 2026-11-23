@@ -99,6 +99,8 @@ export interface Thread {
   last_seq: number | null;
   /** 'face' = 대면 모드(마이그레이션 16 · 마스터 #581) — 가운데 합의문을 둘이 번갈아 고친다. 옛 스레드는 'chat' */
   mode: ThreadMode;
+  /** 고정 태그(마이그레이션 22 · 마스터 #1937) — 이 스레드 글의 주 태그 첫 자리(주제 태그만) · NULL = 고정 없음 */
+  pinned_tag_id: string | null;
 }
 
 export type ThreadMode = 'chat' | 'face';
@@ -206,9 +208,12 @@ export interface Message {
   question?: MessageQuestion | null;
 }
 
+/** 태그 종류(마이그레이션 22 · 마스터 #1933): 'topic' 주제 태그 · 'meta' 메타 태그(횡단 관심사 — 주 태그 첫 자리·차선·답장 상속이 안 됨) */
+export type TagKind = 'topic' | 'meta';
 export interface TagRef {
   id: string;
   name: string;
+  kind: TagKind;
 }
 export interface MessageTags {
   primary: TagRef[];

@@ -844,6 +844,7 @@ async function openThread(id) {
     if (S.detail && !faceActive()) renderRecipients(); // 글을 다 읽은 뒤 «직전 대화 상대»를 다시 고른다(상세가 글보다 먼저 올 수 있다)
     syncEmpty();
     loadQDock().catch(() => {}); // 이 대화의 열린 질문(마스터 #1874)
+    applyPendingCont(); // «#B 스레드로 이어 가기»(#1937)
     const th = S.detail.thread;
     announce(t('app.thread_opened', { kind: kindLabel(th), title: th.title, path: pathOf(th) }));
     renderList();
@@ -889,7 +890,17 @@ function renderHead() {
   $('t-kind').textContent = kindLabel(th);
   $('t-kind').className = `pill ${th.kind === 'room' ? 'room' : ''}`;
   $('t-title').textContent = th.title;
+  const pin = pinnedTag();
+  const pb = $('t-pin');
+  pb.hidden = !pin;
+  if (pin) {
+    pb.textContent = t('app.pin_badge', { name: pin.name });
+    pb.title = t('app.pin_badge_title', { name: pin.name });
+    pb.href = tagHref(pin.id);
+  }
   renderStateMenu(th);
+  renderTagPick();
+  refillContinue();
   $('t-audit').href = `#audit?thread=${encodeURIComponent(th.id)}&since=`;
   $('people-perm').href = `#members?thread=${encodeURIComponent(th.id)}`;
   const parent = th.parent_thread_id ? threadById(th.parent_thread_id) : null;
@@ -1383,6 +1394,12 @@ window.addEventListener('resize', syncToBottom);
   for (const id of ['messages', 'tg-msgs']) mo.observe($(id), { childList: true, subtree: true });
 }
 
+function contSlot(m) {
+  const s = el('span', { class: 'cont-slot' });
+  s._m = m;
+  fillContinue(s);
+  return s;
+}
 function msgEl(m, inherited) {
   const agent = isAgent(m.author_id);
   const mine = S.me && m.author_id === S.me.id;
@@ -1412,6 +1429,7 @@ function msgEl(m, inherited) {
       el('button', { type: 'button', title: t('app.copy_msg_title'), onclick: () => copyMessage(m) }, t('app.copy')),
       el('button', { type: 'button', onclick: () => openFork(m.seq) }, t('app.branch_here')),
     ),
+    inherited ? null : contSlot(m), // «#B 스레드로 이어 가기»(#1937) — .actions 밖(단추 순서를 읽는 곳이 있다)
   );
   const tagLine = tagChips(m);
   const body = el('div', { class: 'body' });
@@ -1453,22 +1471,81 @@ function msgEl(m, inherited) {
 // ───── 태그(마이그레이션 19 · 마스터 #1475): 글의 태그 칩 · 사이드바 목록 · 태그 보기 페이지(#tag/<id> · 1단계는 읽기 전용 보기) ─────
 const tagHref = (id) => `#tag/${encodeURIComponent(id)}`;
 const tagById = (id) => S.tags.find((x) => x.id === id);
-/** rank = 주 태그 순서 이름(마스터 #1674): 'main'·'sub'·'ref' — 주 태그가 둘 이상일 때만 붙인다 · 하나면 이름표 없음 */
+const isMeta = (tg) => (tg?.kind ?? tagById(tg?.id)?.kind) === 'meta';
+/** rank = 주제 태그 순서 이름(마스터 #1674 · #1933): 'main'(«주제»)·'sub'·'ref' — 주제 태그가 둘 이상일 때만 · 메타 태그는 이름표 대신 «메타» 표지(마이그레이션 22) */
 function tagChip(tg, inline, rank = null) {
-  const lbl = inline ? t('app.tag_inline') : rank ? t(`app.tag_${rank}`) : null;
+  const meta = !inline && isMeta(tg);
+  const lbl = inline ? t('app.tag_inline') : meta ? t('app.tag_meta') : rank ? t(`app.tag_${rank}`) : null;
   return el(
     'a',
-    { class: `tag-chip${inline ? ' inline' : ''}${rank ? ` rank-${rank}` : ''}`, href: tagHref(tg.id), title: inline ? t('app.tag_inline_title') : rank ? t(`app.tag_${rank}_title`) : null },
+    {
+      class: `tag-chip${inline ? ' inline' : ''}${meta ? ' meta' : ''}${rank && !meta ? ` rank-${rank}` : ''}`,
+      href: tagHref(tg.id),
+      title: inline ? t('app.tag_inline_title') : meta ? t('app.tag_meta_title') : rank ? t(`app.tag_${rank}_title`) : null,
+    },
     `#${tg.name}`,
     lbl ? el('span', { class: 'faint' }, lbl) : null,
   );
 }
 const tagRank = (i, n) => (n < 2 ? null : i === 0 ? 'main' : i === 1 ? 'sub' : 'ref');
-/** 글의 태그 줄 — 주 태그 뒤에 인라인. 둘 다 비면 null */
+/** 글의 태그 줄 — 주제 태그(순서 이름표) → 메타 태그 → 인라인. 모두 비면 null */
 function tagChips(m) {
   const tg = m.tags;
   if (!tg || (!tg.primary?.length && !tg.inline?.length)) return null;
-  return el('div', { class: 'tags' }, ...(tg.primary ?? []).map((x, i, a) => tagChip(x, false, tagRank(i, a.length))), ...(tg.inline ?? []).map((x) => tagChip(x, true)));
+  const topics = (tg.primary ?? []).filter((x) => !isMeta(x));
+  const metas = (tg.primary ?? []).filter((x) => isMeta(x));
+  return el('div', { class: 'tags' }, ...topics.map((x, i, a) => tagChip(x, false, tagRank(i, a.length))), ...metas.map((x) => tagChip(x, false)), ...(tg.inline ?? []).map((x) => tagChip(x, true)));
+}
+// ── 스레드 고정 태그(마이그레이션 22 · 마스터 #1937) ──
+const pinnedTag = () => {
+  const th = S.detail?.thread;
+  return th && th.id === S.cur && th.pinned_tag_id ? (tagById(th.pinned_tag_id) ?? { id: th.pinned_tag_id, name: th.pinned_tag_id }) : null;
+};
+/** «#B 스레드로 이어 가기»: 고정 스레드의 글에 고정 태그가 아닌 주제 태그가 붙어 있으면 그 글 동작 줄에 단추(마스터만) — 상세가 글보다 늦게 오면 renderHead 가 다시 채운다 */
+function fillContinue(slot) {
+  const m = slot._m;
+  const pin = pinnedTag();
+  const live = (x) => {
+    const tg = tagById(x.id);
+    return tg && !tg.archived_at && !tg.deleted_at && tg.kind !== 'meta';
+  };
+  const others = pin && S.me?.is_master ? (m.tags?.primary ?? []).filter((x) => x.id !== pin.id && !isMeta(x) && live(x)) : [];
+  slot.replaceChildren(...others.map((x) => el('button', { type: 'button', class: 'cont-btn', title: t('app.continue_in_title', { name: x.name }), onclick: () => continueIn(x, m) }, t('app.continue_in', { name: x.name }))));
+}
+function refillContinue() {
+  for (const s of $('messages').querySelectorAll('.cont-slot')) fillContinue(s);
+}
+async function continueIn(tg, m) {
+  let th = S.threads.find((x) => x.kind === 'thread' && x.pinned_tag_id === tg.id && x.status === 'open' && !x.deleted_at);
+  if (!th) {
+    const d = S.detail;
+    try {
+      const r = await api('POST', '/api/threads', {
+        title: `#${tg.name}`,
+        pinned_tag_id: tg.id,
+        members: (d?.members ?? []).map((x) => x.participant_id),
+        default_recipient: d?.thread.default_recipient || undefined,
+        client_key: newKey(),
+      });
+      th = r.thread;
+      await loadThreads();
+    } catch (e) {
+      return notify(t('app.failed_title'), e.message);
+    }
+  }
+  S.pendingCont = { thread: th.id, text: `> ${t('app.continued_from', { seq: m.seq })}\n\n` };
+  location.hash = th.id;
+}
+/** 이어 가기로 연 스레드면 글쓰기 칸 앞에 «#N 에서 이어 감» 인용을 넣는다 */
+function applyPendingCont() {
+  const p = S.pendingCont;
+  if (!p || p.thread !== S.cur) return;
+  S.pendingCont = null;
+  const ta = $('body');
+  if (!ta.value.includes(p.text.trim())) ta.value = p.text + ta.value;
+  ta.dispatchEvent(new Event('input', { bubbles: true }));
+  ta.focus();
+  ta.setSelectionRange(ta.value.length, ta.value.length);
 }
 /** 새 글이 오면 태그 목록(거리 순)을 다시 읽는다 — 글마다 부르지 않게 묶음 */
 let tagReloadTimer = null;
@@ -1671,6 +1748,7 @@ function renderTagPageAdmin(tg) {
   const def = S.defaultAgent ? t('app.tag_owner_default', { name: pname(S.defaultAgent) }) : t('app.tag_owner_default_none');
   $('tg-owner').replaceChildren(el('option', { value: '' }, def), ...agentList().map((a) => el('option', { value: a.id, selected: tg.owner_id === a.id }, a.name)));
   $('tg-owner').disabled = !!tg.archived_at;
+  $('tg-kind').replaceChildren(el('option', { value: 'topic', selected: tg.kind !== 'meta' }, t('app.tag_kind_topic')), el('option', { value: 'meta', selected: tg.kind === 'meta' }, t('app.tag_kind_meta')));
   $('tg-archive').textContent = tg.archived_at ? t('app.tag_restore') : t('app.tag_archive');
   $('tg-hide').textContent = tg.hidden_at ? t('app.tag_unhide') : t('app.tag_hide');
 }
@@ -1684,6 +1762,12 @@ async function patchTag(id, body) {
   }
 }
 $('tg-owner').addEventListener('change', () => S.tagCur && patchTag(S.tagCur, { owner_id: $('tg-owner').value || null }));
+// 종류(마이그레이션 22 · #1933): 주제 ↔ 메타 — 스레드가 고정한 태그는 메타로 못 바꾼다(409 tag_pinned)
+$('tg-kind').addEventListener('change', async () => {
+  if (!S.tagCur) return;
+  await patchTag(S.tagCur, { kind: $('tg-kind').value });
+  renderTagPageAdmin(tagById(S.tagCur));
+});
 $('tg-archive').addEventListener('click', async () => {
   const tg = tagById(S.tagCur);
   if (!tg) return;
@@ -2057,8 +2141,10 @@ function inheritReplyTags(m) {
   const ta = $('body');
   if (S.replyTagLine != null && ta.value === S.replyTagLine) ta.value = S.replyTagPrev ?? ''; // 손대지 않은 채 다른 글에 답장하면 그 글의 태그로 갈아 낀다
   S.replyTagLine = null;
-  const live = new Set((S.tags ?? []).filter((x) => !x.archived_at && !x.hidden_at && !x.deleted_at).map((x) => x.id));
-  const names = (m.tags?.primary ?? []).filter((x) => live.has(x.id)).map((x) => x.name);
+  // 주제 태그만(마스터 #1935 · 메타는 안 이어받는다) · 스레드 고정 태그는 서버가 늘 첫 자리에 넣으므로 줄에 안 쓴다
+  const pin = pinnedTag()?.id;
+  const live = new Set((S.tags ?? []).filter((x) => !x.archived_at && !x.hidden_at && !x.deleted_at && x.kind !== 'meta' && x.id !== pin).map((x) => x.id));
+  const names = (m.tags?.primary ?? []).filter((x) => live.has(x.id) && !isMeta(x)).map((x) => x.name);
   if (!names.length || headTagLine(ta.value).idx >= 0) return;
   const line = names.map((n) => `#${n}`).join(' ');
   const rest = ta.value.replace(/^\n+/, '');
@@ -2589,6 +2675,7 @@ function renderStateMenu(th) {
   $('t-menu').open = false;
   const trash = st === 'trash';
   $('st-rename').hidden = trash;
+  $('st-pin').hidden = trash || !S.me?.is_master;
   $('st-archive').hidden = trash || th.status === 'archived';
   $('st-unarchive').hidden = trash || th.status !== 'archived';
   $('st-hide').hidden = trash || !!th.hidden;
@@ -2659,6 +2746,22 @@ $('st-rename').addEventListener('click', async () => {
   }
   await Promise.all([loadDetail(), loadThreads()]);
   announce(t('app.renamed', { title }));
+});
+// 태그 고정(마스터만 · 마이그레이션 22 · #1937): 주제 태그만 · «고정 없음»으로 푼다
+$('st-pin').addEventListener('click', async () => {
+  const th = S.detail?.thread;
+  if (!th) return;
+  $('t-menu').open = false;
+  const opts = (S.tags ?? []).filter((x) => x.kind !== 'meta' && !x.archived_at && !x.deleted_at && (!x.hidden_at || x.id === th.pinned_tag_id)).sort((a, b) => a.name.localeCompare(b.name));
+  const sel = el('select', { id: 'pin-select', 'aria-label': t('app.pin_label') }, el('option', { value: '' }, t('app.pin_none')), ...opts.map((x) => el('option', { value: x.id, selected: x.id === th.pinned_tag_id }, `#${x.name}`)));
+  const ok = await ask({ title: t('app.pin_title'), ok: t('app.pin_ok'), text: t('app.pin_text'), extra: el('label', { class: 'small' }, t('app.pin_label'), ' ', sel) });
+  if (!ok || (sel.value || null) === (th.pinned_tag_id ?? null)) return;
+  try {
+    await api('POST', `/api/threads/${th.id}/pin-tag`, { tag_id: sel.value || null });
+  } catch (e) {
+    return notify(t('app.failed_title'), e.message);
+  }
+  await Promise.all([loadDetail(), loadThreads()]);
 });
 $('st-purge').addEventListener('click', async () => {
   const th = S.detail?.thread;
@@ -3566,7 +3669,7 @@ boot();
 // ───── 좁은 화면(디자인 #782 · ≤760): ⋯ 시트 · 길게 눌러 글 동작 · 상단 점 · 짧은 자리표시 ─────
 // 머리 동작은 원래 버튼을 그대로 두고(넓은 화면·키보드 단축키가 쓴다) 시트가 그 버튼을 대신 누른다 — 숨김·이름은 열 때마다 원래 버튼에서 읽는다
 const SHEET_IDS = ['t-face', 't-merge', 't-md', 't-copy', 't-audit', 'fork-btn', 'aux-btn'];
-const SHEET_TIDY = ['st-rename', 'st-archive', 'st-unarchive', 'st-hide', 'st-unhide', 'st-trash', 'st-restore', 'st-purge'];
+const SHEET_TIDY = ['st-rename', 'st-pin', 'st-archive', 'st-unarchive', 'st-hide', 'st-unhide', 'st-trash', 'st-restore', 'st-purge'];
 function setSheet(open) {
   const sh = $('t-sheet');
   if (open) {
@@ -3798,10 +3901,16 @@ function renderTagPick() {
   box.hidden = !live.length;
   if (!live.length) return box.replaceChildren();
   const on = new Set(headTagLine($('body').value).names);
+  // 고정 태그(#1937): 맨 앞에 잠긴 칩 — 뺄 수 없다(서버가 모든 글의 첫 자리에 넣는다)
+  const pin = pinnedTag();
+  const lock = pin
+    ? el('button', { type: 'button', class: 'chip tag-pick-chip on locked', disabled: true, 'aria-pressed': 'true', 'data-tag': pin.name, title: t('app.tag_pinned_lock') }, `🔒 #${pin.name}`)
+    : null;
   box.replaceChildren(
     el('span', { class: 'lbl' }, t('app.tag_pick')),
-    ...live.map((tg) => {
-      const b = el('button', { type: 'button', class: `chip tag-pick-chip${on.has(tg.name) ? ' on' : ''}`, 'aria-pressed': String(on.has(tg.name)), 'data-tag': tg.name, title: tagRecipientLine(tg) }, `#${tg.name}`);
+    ...(lock ? [lock] : []),
+    ...live.filter((tg) => tg.id !== pin?.id).map((tg) => {
+      const b = el('button', { type: 'button', class: `chip tag-pick-chip${on.has(tg.name) ? ' on' : ''}${tg.kind === 'meta' ? ' meta' : ''}`, 'aria-pressed': String(on.has(tg.name)), 'data-tag': tg.name, title: tagRecipientLine(tg) }, `#${tg.name}`);
       b.addEventListener('mousedown', (e) => e.preventDefault());
       b.addEventListener('click', () => {
         const ta = $('body');

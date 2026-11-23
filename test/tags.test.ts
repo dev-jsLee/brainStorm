@@ -172,19 +172,23 @@ describe('글에 붙는 태그 · 상속 · 보기 (사양 2.1·2.2)', () => {
     assert.deepEqual(ok.message.tags, { primary: [], inline: [] });
     assert.equal((await ctx.master('GET', `/api/threads/${th}/messages`)).json.messages.length, n0 + 2);
   });
-  test('답장은 원문의 주 태그를 전부 따라간다(#1795) — #A 방에서 #A #B 글에 답해도 #A #B · 원문 순서 앞 · 더 붙인 태그는 뒤 · 답장 아니면 그대로', async () => {
+  test('답장 상속(#1935 — #1795 를 바꿈): 주제 태그를 직접 주면 그것이 원문 주제 태그를 대신한다 · 안 주면 원문 것을 이어받는다 · 답장 아니면 그대로', async () => {
     const src = await post(ctx, th, '#전원 #brainStorm\n원문', { recipients: [] });
     assert.deepEqual(src.message.tags.primary.map((t: any) => t.id), [A, B]);
     const inA = await post(ctx, th, '답', { tags: [A], reply_to_seq: src.message.seq, recipients: [] });
-    assert.deepEqual(inA.message.tags.primary.map((t: any) => t.id), [A, B]);
+    assert.deepEqual(inA.message.tags.primary.map((t: any) => t.id), [A], '보기 태그가 대신한다');
+    assert.equal(inA.message.reply_to_seq, src.message.seq, '답장 연결은 남는다');
     const inB = await post(ctx, th, '답', { tags: [B], reply_to_seq: src.message.seq, recipients: [] });
-    assert.deepEqual(inB.message.tags.primary.map((t: any) => t.id), [A, B]);
+    assert.deepEqual(inB.message.tags.primary.map((t: any) => t.id), [B]);
     const more = await post(ctx, th, '#C서버\n답', { tags: [A], reply_to_seq: src.message.seq, recipients: [] });
-    assert.deepEqual(more.message.tags.primary.map((t: any) => t.id), [A, B, C]);
+    assert.deepEqual(more.message.tags.primary.map((t: any) => t.id), [A, C]);
+    const bare = await post(ctx, th, '그냥 답', { reply_to_seq: src.message.seq, recipients: [] });
+    assert.deepEqual(bare.message.tags.primary.map((t: any) => t.id), [A, B], '주제 태그를 안 주면 원문 것을 이어받는다');
     const plain = await post(ctx, th, '답 아님', { tags: [A], recipients: [] });
     assert.deepEqual(plain.message.tags.primary.map((t: any) => t.id), [A]);
     const ids = async (tag: string) => (await msgsOf(tag)).messages.map((m: any) => m.seq);
-    assert.ok((await ids(B)).includes(inA.message.seq));
+    assert.ok(!(await ids(B)).includes(inA.message.seq));
+    assert.ok((await ids(B)).includes(bare.message.seq));
   });
   test('에이전트 답: 끝줄 태그 줄이 없으면 받은 글의 주 태그를 물려받고 · 있으면 그것을 쓴다', async () => {
     const fa = spawnAdapter(ctx, 'alpha', ['--max-idle-ms', '2500']);

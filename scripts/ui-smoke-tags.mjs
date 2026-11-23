@@ -37,7 +37,7 @@ const src = (f) => fs.readFileSync(new URL(`../public/${f}`, import.meta.url), '
 w.eval(
   (await (await fetch(new URL('/i18n-dict.js', base))).text()) +
     '\n' + ['i18n.js', 'runs.js', 'admin.js', 'claims.js', 'face.js', 'questions.js', 'app.js'].map(src).join('\n') +
-    '\nwindow.__S = S; window.__route = route; window.__loadTags = loadTags;',
+    '\nwindow.__S = S; window.__route = route; window.__loadTags = loadTags; window.__loadThreads = loadThreads;',
 );
 const $ = (id) => w.document.getElementById(id);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -250,7 +250,7 @@ ok($('tag-list').querySelector('details summary')?.textContent === '보관 1', '
   // 메인·서브·참조 이름표(마스터 #1674): 주 태그 둘 이상일 때만
   const chips = (names) => w.eval('tagChips')({ tags: { primary: names.map((n) => ({ id: tg(n).id, name: n })), inline: [] } });
   const three = chips(['장애', '전력', 'NAS']);
-  ok([...three.querySelectorAll('.tag-chip')].map((c) => c.querySelector('.faint')?.textContent).join(',') === '메인,서브,참조' && three.querySelector('.rank-ref'), '셋이면 메인·서브·참조 이름표');
+  ok([...three.querySelectorAll('.tag-chip')].map((c) => c.querySelector('.faint')?.textContent).join(',') === '주제,서브,참조' && three.querySelector('.rank-ref'), '셋이면 주제·서브·참조 이름표(«메인» → «주제» · #1933)');
   ok(!chips(['장애']).querySelector('.faint'), '하나면 이름표 없음');
   reply(903, ['인프라', '전력']);
   ok(ta.value === '#전력\n', '보관 태그(#인프라)는 안 들고 옴');
@@ -345,6 +345,62 @@ ok($('tag-list').querySelector('details summary')?.textContent === '보관 1', '
   await until(() => !cur(), '목록에서 사라짐');
   ok(!$('tag-list').textContent.includes('관리시험'), '영구 삭제 → 휴지통 묶음에서도 사라짐');
   ok((await ctx.master('POST', '/api/tags', { name: '관리시험' })).status === 201, '같은 이름을 다시 만들 수 있음');
+}
+// 태그 종류 · 스레드 고정 태그(v0.50.0 · 마이그레이션 22 · 마스터 #1933·#1935·#1937)
+{
+  const mk = async (name) => (await (await w.fetch('/api/tags', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name }) })).json()).tag.id;
+  const P = await mk('주제A');
+  const MT = await mk('개선안');
+  await w.__loadTags();
+  const byId = (id) => w.__S.tags.find((x) => x.id === id);
+  ok(byId(MT).kind === 'topic', '새 태그는 주제 태그');
+  await go(`tag/${MT}`);
+  await until(() => !$('tg-admin').hidden && $('tg-kind').options.length === 2, '태그 머리 «종류» 고르개');
+  $('tg-kind').value = 'meta';
+  $('tg-kind').dispatchEvent(new w.Event('change'));
+  await until(() => byId(MT)?.kind === 'meta', '메타로 바뀜');
+  ok($('tg-kind').value === 'meta', '고르개가 메타를 보임');
+  // 스레드 «정리» → «태그 고정…»
+  const th = (await ctx.master('POST', '/api/threads', { title: '고정 시험', members: ['alpha'] })).json.thread.id;
+  await w.__loadThreads();
+  await go(th);
+  await until(() => w.__S.detail?.thread.id === th, '스레드 열림');
+  ok($('t-pin').hidden && !$('st-pin').hidden, '고정 없음 · 정리 메뉴에 «태그 고정…»');
+  $('st-pin').click();
+  await until(() => !$('confirm').hidden && $('pin-select'), '고정 대화상자');
+  ok(![...$('pin-select').options].some((o) => o.value === MT), '메타 태그는 고를 수 없음');
+  $('pin-select').value = P;
+  $('confirm-ok').click();
+  await until(() => !$('t-pin').hidden, '머리에 고정 표지');
+  ok($('t-pin').textContent === '#주제A 고정', '«#주제A 고정»');
+  const lock = $('tag-pick').querySelector('.tag-pick-chip.locked');
+  ok(lock && lock.disabled && lock.textContent.includes('#주제A'), '글쓰기 칸 고르개에 잠긴 고정 칩');
+  // 글: 첫 자리 고정 · 메타는 «메타» 표지 · 고정 아닌 주제 태그면 «이어 가기» 단추
+  await ctx.master('POST', `/api/threads/${th}/messages`, { client_key: 'pin-1', body: '#개선안 #NAS\n고정 방 글', recipients: [] });
+  await until(() => [...$('messages').querySelectorAll('.msg')].some((x) => x.textContent.includes('고정 방 글')), '글 그려짐');
+  const node = [...$('messages').querySelectorAll('.msg')].find((x) => x.textContent.includes('고정 방 글'));
+  const chips = [...node.querySelectorAll('.tags .tag-chip')];
+  ok(chips[0]?.textContent.startsWith('#주제A') && chips[0].textContent.includes('주제'), '첫 칩 = 고정 태그 · «주제» 이름표');
+  ok(chips[1]?.textContent.startsWith('#NAS') && chips[2]?.classList.contains('meta') && chips[2].textContent.includes('메타'), '다른 주제 다음에 메타 칩(«메타» 표지)');
+  const cont = node.querySelector('.cont-btn');
+  ok(cont && cont.textContent === '#NAS 스레드로 이어 가기', '«#NAS 스레드로 이어 가기» 단추');
+  // 답장 단추: 주제 태그만 · 고정 태그는 줄에 안 씀
+  node.querySelector('.actions button').click();
+  ok($('body').value.startsWith('#NAS\n'), '답장 상속 = 주제 태그만(메타·고정 뺌)');
+  $('body').value = '';
+  w.__S.replyTagLine = null;
+  cont.click();
+  await until(() => w.__S.cur !== th && w.__S.detail?.thread.pinned_tag_id === byId(w.__S.tags.find((x) => x.name === 'NAS').id).id, '#NAS 고정 새 스레드로 이동');
+  ok(w.__S.detail.thread.title === '#NAS', '제목 «#NAS»');
+  await until(() => $('body').value.includes('에서 이어 감'), '이어 감 인용');
+  const seq = node.id.slice(1);
+  ok($('body').value.startsWith(`> #${seq} 에서 이어 감`), '글쓰기 칸에 «#N 에서 이어 감»');
+  const n0 = w.__S.threads.length;
+  await go(th);
+  await until(() => w.__S.detail?.thread.id === th && $('messages').querySelector('.cont-btn'), '원래 스레드로');
+  $('messages').querySelector('.cont-btn').click();
+  await until(() => w.__S.cur !== th && w.__S.detail?.thread.title === '#NAS', '다시 누르면 있는 스레드로');
+  ok(w.__S.threads.length === n0, '새로 만들지 않음');
 }
 console.log('errors:', errors);
 if (errors.length) throw new Error('화면 오류');

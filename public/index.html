@@ -116,6 +116,7 @@
           <div class="title-row">
             <span id="t-kind" class="pill"></span>
             <h2 id="t-title" tabindex="-1"></h2>
+            <a id="t-pin" class="pill pin-badge" hidden></a>
             <span class="spacer"></span>
             <button type="button" id="t-face" class="small head-link" aria-pressed="false" data-i18n="html.convo.face" hidden>대면 모드</button>
             <button type="button" id="t-merge" class="small head-link" hidden title="이 하위 스레드의 글을 상위 대화에 묶음으로 옮겨 거기서 이어 간다" data-i18n="html.convo.merge" data-i18n-attr="title:html.convo.mergeTitle">⤴ 상위로 합치기</button>
@@ -126,6 +127,7 @@
               <summary class="small" title="이름 바꾸기 · 보관·숨김·삭제(아래 분기 스레드까지 같이 걸립니다)" data-i18n="html.convo.tidy" data-i18n-attr="title:html.convo.tidyTitle">정리</summary>
               <div class="menu-pop" role="menu">
                 <button type="button" role="menuitem" id="st-rename" data-i18n="html.convo.rename">이름 바꾸기…</button>
+                <button type="button" role="menuitem" id="st-pin" data-i18n="html.convo.pinTag">태그 고정…</button>
                 <button type="button" role="menuitem" id="st-archive" data-i18n="html.convo.archive">보관(읽기 전용)</button>
                 <button type="button" role="menuitem" id="st-unarchive" data-i18n="html.convo.unarchive">보관 해제</button>
                 <button type="button" role="menuitem" id="st-hide" data-i18n="html.convo.hide">목록에서 숨기기</button>
@@ -330,6 +332,7 @@
       <p id="tg-empty" class="muted small" hidden data-i18n="html.tag.empty">이 태그가 붙은 글이 아직 없습니다.</p>
       <div id="tg-admin" class="tg-admin small" hidden>
         <label><span data-i18n="html.tag.owner">담당자</span> <select id="tg-owner" aria-label="담당자" data-i18n-attr="aria-label:html.tag.owner"></select></label>
+        <label><span data-i18n="html.tag.kind">종류</span> <select id="tg-kind" aria-label="종류" data-i18n-attr="aria-label:html.tag.kind"></select></label>
         <button type="button" id="tg-archive" class="small"></button>
         <button type="button" id="tg-hide" class="small"></button>
         <button type="button" id="tg-trash" class="small danger" data-i18n="html.tag.trash">삭제</button>

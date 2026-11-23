@@ -259,7 +259,7 @@ export async function buildApp(cfg: Config, opts: { logger?: boolean; registry?:
   fastify.post<{ Body: { name?: unknown; owner_id?: unknown } }>('/api/tags', { preHandler: auth }, async (req, reply) =>
     reply.code(201).send({ tag: store.tags.create(req.principal!, req.body ?? {}) }),
   );
-  fastify.patch<{ Params: { id: string }; Body: { name?: unknown; owner_id?: unknown; archived?: unknown; hidden?: unknown } }>('/api/tags/:id', { preHandler: auth }, async (req) => ({
+  fastify.patch<{ Params: { id: string }; Body: { name?: unknown; owner_id?: unknown; archived?: unknown; hidden?: unknown; kind?: unknown } }>('/api/tags/:id', { preHandler: auth }, async (req) => ({
     tag: store.tags.update(req.principal!, req.params.id, req.body ?? {}),
   }));
   // 태그 휴지통(마스터만 · 마이그레이션 21): 버리기 · 되살리기 · 영구 삭제(휴지통 것만 — 아니면 409 not_in_trash)
@@ -365,6 +365,10 @@ export async function buildApp(cfg: Config, opts: { logger?: boolean; registry?:
   // 이름 바꾸기(마스터만)
   fastify.post<P & { Body: { title?: unknown } }>('/api/threads/:id/rename', { preHandler: auth }, async (req) =>
     store.renameThread(req.principal!, req.params.id, (req.body ?? {}).title),
+  );
+  // 고정 태그(마스터만 · 마이그레이션 22 · #1937): { tag_id: "<주제 태그 id>" | null }
+  fastify.post<P & { Body: { tag_id?: unknown } }>('/api/threads/:id/pin-tag', { preHandler: auth }, async (req) =>
+    store.pinThreadTag(req.principal!, req.params.id, (req.body ?? {}).tag_id ?? null),
   );
   // 영구 삭제(마스터만): 휴지통 + 아래 분기도 휴지통 + confirm = 제목
   fastify.post<P & { Body: { confirm?: unknown } }>('/api/threads/:id/purge', { preHandler: auth }, async (req) =>
