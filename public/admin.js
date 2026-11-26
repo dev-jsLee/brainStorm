@@ -603,6 +603,9 @@ async function revokeAsk(a, c) {
 
 // ───── 멤버 권한 ─────
 async function showMembers(params) {
+  const agent = params?.get('agent');
+  if (agent || (!params?.get('thread') && S.mbBy === 'agent')) return showMembersByAgent(agent || S.mbAgent);
+  setMbBy('thread');
   const want = params?.get('thread') || S.mbThread || S.cur || room()?.id;
   S.mbThread = want && threadById(want) ? want : room()?.id ?? S.threads[0]?.id ?? null;
   fillMemberThreads();
@@ -630,6 +633,7 @@ async function loadMembers() {
   renderMembers();
 }
 function renderMembers() {
+  if (S.mbBy === 'agent') return renderMembersByAgent();
   const d = S.mbDetail;
   if (!d || S.mode !== 'members') return;
   const thr = d.thread;
@@ -716,13 +720,194 @@ async function changeMember(p, body) {
   renderMembers();
 }
 
+// ───── 멤버별 보기(마스터 #2030): 멤버 하나를 골라 대화마다 권한 ─────
+function mbAgents() {
+  return [...S.participants.values()].filter((p) => p.kind === 'agent' && !p.disabled).sort((a, b) => a.name.localeCompare(b.name));
+}
+function setMbBy(by) {
+  S.mbBy = by;
+  const ag = by === 'agent';
+  $('mb-by-thread').setAttribute('aria-pressed', String(!ag));
+  $('mb-by-agent').setAttribute('aria-pressed', String(ag));
+  $('mb-thread-l').hidden = ag;
+  $('mb-agent-l').hidden = !ag;
+  $('mb-agent-note').hidden = !ag;
+  if (!ag) delete $('mb-table').dataset.agent;
+}
+async function showMembersByAgent(want) {
+  setMbBy('agent');
+  const agents = mbAgents();
+  S.mbAgent = want && agents.some((a) => a.id === want) ? want : agents[0]?.id ?? null;
+  $('mb-agent').replaceChildren(...agents.map((a) => el('option', { value: a.id }, `${a.name} (${a.id})`)));
+  if (S.mbAgent) $('mb-agent').value = S.mbAgent;
+  $('mb-status').textContent = '';
+  $('mb-h').focus();
+  await loadMembersByAgent();
+}
+let mbaSeq = 0;
+async function loadMembersByAgent() {
+  if (!S.mbAgent) return $('mb-table').replaceChildren(el('p', { class: 'muted' }, t('admin.no_agents')));
+  const my = ++mbaSeq;
+  if (S.mbRowsFor !== S.mbAgent) {
+    // 다른 멤버로 바꾸는 중 — 앞 멤버의 줄을 남기면 그 칸을 눌러 엉뚱한 멤버를 바꾼다
+    S.mbRows = null;
+    $('mb-table').replaceChildren(el('p', { class: 'muted' }, '…'));
+  }
+  try {
+    const d = await api('GET', `/api/participants/${encodeURIComponent(S.mbAgent)}/memberships`);
+    if (my !== mbaSeq) return;
+    S.mbRows = new Map(d.memberships.map((m) => [m.thread_id, m]));
+    S.mbRowsFor = d.participant_id;
+  } catch (e) {
+    if (my === mbaSeq) $('mb-table').replaceChildren(el('p', { class: 'err' }, t('admin.load_failed', { error: e.message })));
+    return;
+  }
+  renderMembersByAgent();
+}
+/** 걸러 보이는 대화(제목·경로에 낱말) — 서버 목록 순서(채팅방 먼저 · 만든 순) */
+function mbVisible() {
+  const q = (S.mbFilter || '').trim().toLowerCase();
+  const out = [];
+  for (const [id, m] of S.mbRows ?? []) {
+    const th = threadById(id);
+    if (!th || th.deleted_at) continue;
+    const label = pathOf(th);
+    if (q && !label.toLowerCase().includes(q)) continue;
+    out.push({ th, m, label });
+  }
+  return out;
+}
+function renderMembersByAgent() {
+  if (S.mode !== 'members' || S.mbBy !== 'agent' || !S.mbRows) return;
+  const p = S.participants.get(S.mbRowsFor);
+  if (!p) return;
+  const busy = !!S.mbBusy;
+  const narrow = isNarrow();
+  const rows = mbVisible();
+  const cb = (label, checked, disabled, onchange, k) => {
+    const i = el('input', { type: 'checkbox', checked, disabled: disabled || busy, 'aria-label': label, 'data-k': k });
+    if (onchange) i.addEventListener('change', () => onchange(i));
+    return i;
+  };
+  const rowFor = ({ th, m, label }) => {
+    const on = !!m.member;
+    const name = el('span', {}, th.kind === 'room' ? `${t('admin.room_tag')} ` : '', el('a', { href: `#${th.id}` }, label), th.default_recipient === p.id ? el('div', { class: 'faint small' }, t('admin.default_recipient')) : null);
+    const cells = [
+      name,
+      cb(t('admin.cb_member', { name: label }), on, false, (i) => changeMemberAt(th.id, p, i.checked ? { can_read: true, can_post: true } : { remove: true }), 'member'),
+      cb(t('admin.cb_read', { name: label }), on && m.can_read, !on, (i) => changeMemberAt(th.id, p, { can_read: i.checked, can_post: i.checked ? !!m.can_post : false }), 'read'),
+      cb(t('admin.cb_post', { name: label }), on && m.can_post, !on || !m.can_read, (i) => changeMemberAt(th.id, p, { can_read: true, can_post: i.checked }), 'post'),
+    ];
+    return narrow
+      ? el('li', { class: `rcard mb-row${on ? '' : ' dim'}`, 'data-tid': th.id }, el('div', { class: 'rc1' }, cells[0]), el('div', { class: 'mb-toggles' }, el('label', {}, cells[1], ` ${t('admin.member')}`), el('label', {}, cells[2], ` ${t('admin.read')}`), el('label', {}, cells[3], ` ${t('admin.post')}`)))
+      : el('tr', { class: `mb-row${on ? '' : ' dim'}`, 'data-tid': th.id }, ...cells.map((c) => el('td', {}, c)));
+  };
+  const filter = el('input', { type: 'search', id: 'mb-filter', value: S.mbFilter || '', placeholder: t('admin.mb_filter'), 'aria-label': t('admin.mb_filter') });
+  let ft = null;
+  filter.addEventListener('input', () => {
+    clearTimeout(ft);
+    ft = setTimeout(() => {
+      S.mbFilter = filter.value;
+      if (S.mode !== 'members' || S.mbBy !== 'agent') return;
+      renderMembersByAgent();
+      const f = $('mb-filter');
+      if (!f) return;
+      f.focus();
+      f.setSelectionRange(f.value.length, f.value.length);
+    }, 200);
+  });
+  const bulk = (key, body) => el('button', { type: 'button', class: 'small', disabled: busy || !rows.length, onclick: () => bulkMembers(p, rows, body, t(key)) }, t(key));
+  const count = rows.filter((r) => r.m.member).length;
+  const head = el(
+    'div',
+    { class: 'mb-head small' },
+    el('b', {}, p.name),
+    ' · ',
+    t('admin.mb_count', { n: count, total: rows.length }),
+    ' · ',
+    el('a', { href: `#audit?actor=&action=member.*&q=${encodeURIComponent(p.id)}&since=` }, t('admin.view_log_paren')),
+  );
+  const tools = el('div', { class: 'mb-bulk small' }, filter, el('span', { class: 'faint' }, t('admin.mb_bulk_label', { n: rows.length })), bulk('admin.mb_bulk_rw', { can_read: true, can_post: true }), bulk('admin.mb_bulk_ro', { can_read: true, can_post: false }), bulk('admin.mb_bulk_remove', { remove: true }));
+  const list = !rows.length
+    ? el('p', { class: 'muted' }, t('admin.no_threads'))
+    : narrow
+    ? el('ul', { class: 'rcards' }, ...rows.map(rowFor))
+    : el(
+        'table',
+        { class: 'rtable mbtable' },
+        el('thead', {}, el('tr', {}, ...[t('html.common.conversation'), t('admin.member'), t('admin.read'), t('admin.post')].map((h) => el('th', { scope: 'col' }, h)))),
+        el('tbody', {}, ...rows.map(rowFor)),
+      );
+  $('mb-table').replaceChildren(head, tools, list);
+  $('mb-table').dataset.agent = p.id;
+}
+/** 한 줄 바꾸기 — 대화별 보기의 changeMember 와 같은 API · 빼기는 확인창 */
+async function changeMemberAt(threadId, p, body) {
+  const thr = threadById(threadId);
+  if (body.remove) {
+    const ok = await ask({ title: t('admin.remove_title'), text: t('admin.remove_text', { name: p.name, title: thr?.title ?? threadId }), ok: t('admin.remove'), danger: true });
+    if (!ok) return renderMembersByAgent();
+  }
+  S.mbBusy = true;
+  renderMembersByAgent();
+  try {
+    const m = await postMember(threadId, p, body);
+    const now = m.member ? t('admin.perm_now', { read: m.can_read ? t('admin.on') : t('admin.off'), post: m.can_post ? t('admin.on') : t('admin.off') }) : t('admin.not_member');
+    $('mb-status').textContent = t('admin.perm_saved', { name: `${p.name} · ${pathOf(thr ?? { id: threadId, title: threadId })}`, now });
+    announce(t('admin.perm_changed', { name: p.name, now }));
+  } catch (e) {
+    $('mb-status').textContent = t('admin.change_failed', { error: e.message });
+  }
+  S.mbBusy = false;
+  renderMembersByAgent();
+}
+async function postMember(threadId, p, body) {
+  const d = await api('POST', `/api/threads/${encodeURIComponent(threadId)}/members`, { participant_id: p.id, ...body });
+  const x = d.members.find((y) => y.participant_id === p.id);
+  const m = x ? { thread_id: threadId, member: true, can_read: !!x.can_read, can_post: !!x.can_post } : { thread_id: threadId, member: false };
+  S.mbRows?.set(threadId, m);
+  return m;
+}
+/** 보이는 대화 모두에 같은 권한 — 이미 그 상태인 대화는 건너뜀 · 하나씩 보내 감사 기록도 대화마다 남는다 */
+async function bulkMembers(p, rows, body, label) {
+  const same = (m) => (body.remove ? !m.member : m.member && m.can_read === body.can_read && m.can_post === body.can_post);
+  const todo = rows.filter((r) => !same(r.m));
+  if (!todo.length) return ($('mb-status').textContent = t('admin.mb_bulk_none'));
+  const ok = await ask({
+    title: label,
+    text: t(body.remove ? 'admin.mb_bulk_remove_text' : 'admin.mb_bulk_text', { name: p.name, n: todo.length }),
+    ok: label,
+    danger: !!body.remove,
+  });
+  if (!ok) return;
+  S.mbBusy = true;
+  let done = 0;
+  const fails = [];
+  for (const r of todo) {
+    $('mb-status').textContent = t('admin.mb_bulk_progress', { done, n: todo.length });
+    renderMembersByAgent();
+    try {
+      await postMember(r.th.id, p, body);
+      done++;
+    } catch (e) {
+      fails.push(`${r.label}: ${e.message}`);
+    }
+  }
+  S.mbBusy = false;
+  $('mb-status').textContent = t('admin.mb_bulk_done', { done, n: todo.length }) + (fails.length ? ` · ${t('admin.change_failed', { error: fails.join(' / ') })}` : '');
+  announce($('mb-status').textContent);
+  renderMembersByAgent();
+}
+
 /** 알림이 오면(대화 바뀜·재접속) 열려 있는 관리 화면을 다시 읽는다 */
 let adminReloadTimer = null;
 function refreshAdminPage(threadId) {
   if (S.mode !== 'members' && S.mode !== 'agents') return;
   clearTimeout(adminReloadTimer);
   adminReloadTimer = setTimeout(() => {
-    if (S.mode === 'members') {
+    if (S.mode === 'members' && S.mbBy === 'agent') {
+      if (!S.mbBusy) loadMembersByAgent();
+    } else if (S.mode === 'members') {
       fillMemberThreads();
       if (!threadId || threadId === S.mbThread) loadMembers();
     } else if (S.mode === 'agents') loadConnections();
@@ -745,6 +930,21 @@ function initAdmin() {
   $('ag-hide-revoked').addEventListener('change', (e) => {
     store(AG_HIDE_KEY, e.target.checked ? '1' : '0');
     renderConnections();
+  });
+  $('mb-by-thread').addEventListener('click', () => {
+    S.mbBy = 'thread';
+    location.hash = `members?thread=${encodeURIComponent(S.mbThread || S.cur || room()?.id || '')}`;
+  });
+  $('mb-by-agent').addEventListener('click', () => {
+    S.mbBy = 'agent';
+    const a = mbAgents()[0];
+    location.hash = `members?agent=${encodeURIComponent(S.mbAgent || a?.id || '')}`;
+  });
+  $('mb-agent').addEventListener('change', () => {
+    S.mbAgent = $('mb-agent').value;
+    history.replaceState(null, '', `#members?agent=${encodeURIComponent(S.mbAgent)}`);
+    $('mb-status').textContent = '';
+    loadMembersByAgent();
   });
   $('mb-thread').addEventListener('change', () => {
     S.mbThread = $('mb-thread').value;

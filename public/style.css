@@ -135,7 +135,7 @@ body.rail-collapsed #rail-btn .i-close { display: none; }
 #me { font-size: 13px; }
 
 /* ── 한 사이드바(마스터 #1740 · Claude WebUI 꼴): #nav = 주요 메뉴(위 · 고정) + 대화 목록(아래 · 목록만 스크롤) │ 대화 │ 보조 패널 ── */
-.work { display: grid; height: calc(100% - var(--top-h)); grid-template-columns: var(--nav-w) minmax(0, 1fr); grid-template-areas: "nav convo"; }
+.work { position: relative; display: grid; height: calc(100% - var(--top-h)); grid-template-columns: var(--nav-w) minmax(0, 1fr); grid-template-areas: "nav convo"; }
 .work.aux-open { grid-template-columns: var(--nav-w) minmax(0, 1fr) var(--aux-w); grid-template-areas: "nav convo aux"; }
 /* 키가 낮아 목록 자리(240px)가 안 나오면 사이드바 전체가 스크롤된다 */
 #nav { grid-area: nav; min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--bg); border-right: 1px solid var(--line); overflow-y: auto; overflow-x: hidden; }
@@ -190,6 +190,26 @@ body.rail-collapsed #rail-btn .i-close { display: none; }
 .pill.st-hidden { border-style: dashed; }
 .pill.st-trash { color: var(--danger); border-color: currentColor; }
 .sec-tools { display: flex; align-items: center; gap: 8px; }
+/* 줄바꿈 금지 규칙(마스터 #2031): 이름표·단추·체크 상자 글·작은 링크처럼 «한 덩어리»인 글은 줄을 바꾸지 않고 제 너비를 지킨다.
+   폭이 모자라면 글자를 쪼개는 대신 덩어리째 다음 줄로 내린다(.sec-row · .sec-tools 는 감싸기) — «보관 포\n함»·«태\n그» 같은 꼴이 안 나온다.
+   긴 제목(.conv-item .ttl 등)은 이 규칙이 아니라 말줄임(…)이다. 새 UI 도 같은 규칙: 덩어리 글은 .nowrap 또는 아래 선택자에 든다. */
+.nowrap, .sec, .sec-tools > *, .sec-row > *, .sec-row select, .tag-more, #tag-default-row,
+#nav button:not(.conv-item), #nav label, .menu-group, .chip { white-space: nowrap; }
+.sec-row { flex-wrap: wrap; gap: 4px 8px; }
+.sec-row > .sec { flex: none; }
+.sec-tools { flex-wrap: wrap; justify-content: flex-end; margin-left: auto; }
+.sec-tools > * { flex: none; }
+/* 사이드바 너비 조정(마스터 #2031): ≥1000 · 펼친 사이드바의 오른쪽 가장자리 손잡이를 끌거나 ←→(Shift 는 크게) · 두 번 누르면 기본 · 이 브라우저에 기억(bs.nav-w) */
+#nav-resize { display: none; }
+@media (min-width: 1000px) {
+  body.nav-sized:not(.rail-collapsed) { --nav-w: var(--nav-user-w, 272px); }
+  body:not(.rail-collapsed) #nav-resize { display: block; position: absolute; top: 0; bottom: 0; left: calc(var(--nav-w) - 4px); width: 8px; z-index: 5; cursor: col-resize; touch-action: none; }
+  #nav-resize::after { content: ''; position: absolute; top: 0; bottom: 0; left: 3px; width: 2px; background: transparent; transition: background .12s; }
+  #nav-resize:hover::after, #nav-resize:focus-visible::after, body.nav-resizing #nav-resize::after { background: var(--accent); }
+  #nav-resize:focus-visible { outline: none; }
+  body.nav-resizing { cursor: col-resize; user-select: none; }
+  body.nav-resizing iframe { pointer-events: none; }
+}
 .menu { position: relative; }
 .menu > summary { list-style: none; cursor: pointer; padding: 3px 10px; border: 1px solid var(--line); border-radius: 4px; color: var(--muted); font-size: 13px; }
 .menu > summary:hover { background: var(--hover); }
@@ -302,6 +322,15 @@ body.rail-collapsed #rail-btn .i-close { display: none; }
 .body pre.has-copy { position: relative; padding-top: 30px; }
 .body pre .code-copy { position: absolute; top: 4px; right: 6px; font-family: inherit; font-size: 12px; line-height: 1.4; padding: 1px 8px; color: var(--accent-700); background: var(--bg); border: 1px solid var(--line); border-radius: 3px; white-space: nowrap; }
 .body pre .code-copy.done { color: var(--ok); border-color: var(--ok); }
+/* 단계 카드(마스터 #2035) — ```steps 4/8 */
+.body .steps-card { margin: 6px 0; padding: 10px 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--card); }
+.body .steps-head { font-size: 12px; color: var(--muted, #888); white-space: nowrap; }
+.body .steps-title { font-weight: 700; margin: 2px 0 4px; }
+.body .steps-body > :first-child { margin-top: 0; }
+.body .steps-body > :last-child { margin-bottom: 0; }
+.body .steps-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.body .steps-actions button { white-space: nowrap; }
+.body .steps-done { color: var(--ok); font-size: 13px; white-space: nowrap; }
 @media (hover: hover) and (min-width: 761px) {
   .body pre.has-copy { padding-top: 10px; }
   .body pre .code-copy { opacity: 0; transition: opacity .12s; }
@@ -410,6 +439,8 @@ body.rail-collapsed #rail-btn .i-close { display: none; }
 .to-bottom { position: fixed; z-index: 20; width: 40px; height: 40px; border-radius: 50%; border: 1px solid var(--line); background: var(--bg); color: var(--fg); box-shadow: var(--shadow-lg); display: inline-flex; align-items: center; justify-content: center; padding: 0; cursor: pointer; }
 .to-bottom:hover { color: var(--accent); border-color: var(--accent); }
 .to-bottom[hidden] { display: none; }
+.placed-note { position: fixed; z-index: 20; left: 50%; bottom: 120px; transform: translateX(-50%); max-width: calc(100vw - 32px); padding: 6px 14px; border-radius: 999px; border: 1px solid var(--accent); background: var(--bg); color: var(--accent-700); box-shadow: var(--shadow-lg); font: inherit; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
+.placed-note[hidden] { display: none; }
 .page-head { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; margin: 4px 0 18px; }
 .page-head h2 { font-size: 38px; font-weight: 400; line-height: 1.1; }
 .back { font-size: 12.5px; color: var(--accent-700); text-decoration: none; }
@@ -544,6 +575,8 @@ body.rail-collapsed #rail-btn .i-close { display: none; }
 .mb-toggles { display: flex; gap: 16px; flex-wrap: wrap; padding: 4px 0; }
 .mb-toggles label { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; }
 .rcard.mb-row.dim { color: var(--muted); }
+.mb-bulk { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 0 0 10px; }
+.mb-bulk input[type=search] { min-width: 12em; flex: 1 1 14em; max-width: 24em; }
 #mb-status { margin-top: 10px; }
 .ag-card .alertish { color: var(--danger); font-weight: 600; }
 
@@ -838,7 +871,12 @@ button.linkish { background: none; border: 0; padding: 0; cursor: pointer; text-
 
 /* 태그 고르개(마스터 #1529) — 수신 대상 위 한 줄 · 넘치면 가로로 민다 */
 /* 두 줄까지 감싸고 넘치면 세로 스크롤(마스터 #1548 · 전엔 한 줄 가로 스크롤) */
-.tag-pick { flex-wrap: wrap; max-height: calc(2 * 26px + 6px); overflow-y: auto; margin-bottom: 6px; }
+.tag-pick { flex-direction: column; align-items: stretch; flex-wrap: nowrap; gap: 4px; margin-bottom: 6px; }
+.tag-pick-row { display: flex; flex-wrap: nowrap; gap: 6px; align-items: center; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
+.tag-pick-row::-webkit-scrollbar { display: none; }
+.tag-pick-row > * { flex: none; }
+.tag-pick-row .lbl { min-width: 4.5em; }
+.tag-suggest .tg-kind.meta { color: var(--muted); font-style: italic; }
 .tag-pick .chip { min-height: 26px; padding: 0 10px; font-size: 12.5px; background: none; color: inherit; }
 .tag-pick .chip.on { border-color: var(--accent); color: var(--accent-700); background: color-mix(in srgb, var(--accent) 8%, transparent); }
 

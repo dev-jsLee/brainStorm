@@ -100,13 +100,24 @@ function mdBlocks(lines) {
   for (let i = 0; i < lines.length; ) {
     const line = lines[i];
     let m;
-    if ((m = line.match(/^ {0,3}(```+|~~~+)\s*([\w+-]*)\s*$/))) {
+    if ((m = line.match(/^ {0,3}(```+|~~~+)\s*([\w+-]*)(?:\s+(\d{1,3})\s*\/\s*(\d{1,3}))?\s*$/))) {
       flush();
       const fence = m[1];
       const code = [];
       i++;
       while (i < lines.length && !lines[i].trim().startsWith(fence)) code.push(lines[i++]);
       i++;
+      // 단계 카드(마스터 #2035) — ```steps 4/8 · 첫 줄 = 제목 · 나머지 = 마크다운(번호 목록·링크). «완료» 단추는 msgEl 이 붙인다
+      if (m[2] === 'steps') {
+        const body = code.slice();
+        while (body.length && !body[0].trim()) body.shift();
+        const title = (body.shift() ?? '').replace(/^\s*#*\s*/, '');
+        const n = m[3] ? `${m[3]}/${m[4]}` : '';
+        out.push(
+          `<div class="steps-card"${n ? ` data-step="${m[3]}" data-total="${m[4]}"` : ''}><div class="steps-head">${n ? t('app.steps_of', { i: m[3], n: m[4] }) : t('app.steps_label')}</div><div class="steps-title">${mdInline(title)}</div><div class="steps-body">${mdBlocks(body)}</div></div>`,
+        );
+        continue;
+      }
       out.push(`<pre><code${m[2] ? ` data-lang="${m[2]}"` : ''}>${code.join('\n')}</code></pre>`);
       continue;
     }
@@ -194,6 +205,42 @@ function renderPlain(text) {
 }
 /** 대화마다 «원문 보기»(마스터 #477) — 기본은 마크다운, 원문으로 바꾼 대화만 이 브라우저에 기억 */
 const isPlain = (threadId) => !!threadId && store(`bs.plain.${threadId}`) === '1';
+/** 단계 카드의 «완료»(마스터 #2035) — 마스터가 누르면 «✓ 완료 · 4/8 제목»을 그 글에 답장으로 쓴 에이전트에게 보낸다(에이전트가 깨어 다음 단계를 낸다).
+ *  이미 그 글에 «✓ 완료» 답장이 있으면 «완료됨»으로만 보인다 */
+const STEPS_DONE = '✓ ';
+function wireSteps(body, m) {
+  const cards = body.querySelectorAll('.steps-card');
+  if (!cards.length) return;
+  const done = S.messages.some((x) => x.reply_to_seq === m.seq && x.author_id === S.me?.id && x.body.startsWith(STEPS_DONE));
+  for (const card of cards) {
+    const title = card.querySelector('.steps-title')?.textContent.trim() ?? '';
+    const n = card.dataset.step ? `${card.dataset.step}/${card.dataset.total} ` : '';
+    const row = el('div', { class: 'steps-actions' });
+    if (done) row.append(el('span', { class: 'steps-done' }, t('app.steps_done_mark')));
+    else if (S.me?.is_master) {
+      const b = el('button', { type: 'button', class: 'primary' }, t('app.steps_done'));
+      b.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        b.disabled = true;
+        try {
+          await api('POST', `/api/threads/${m.thread_id ?? S.cur}/messages`, {
+            client_key: newKey(),
+            body: `${STEPS_DONE}${t('app.steps_done_body', { n, title })}`,
+            recipients: isAgent(m.author_id) ? [m.author_id] : [],
+            reply_to_seq: m.seq,
+          });
+          row.replaceChildren(el('span', { class: 'steps-done' }, t('app.steps_done_mark')));
+          if ((m.thread_id ?? S.cur) === S.cur) fetchNew().catch(() => {});
+        } catch (err) {
+          b.disabled = false;
+          notify(t('app.steps_done_failed'), err.message ?? '');
+        }
+      });
+      row.append(b);
+    }
+    if (row.childNodes.length) card.append(row);
+  }
+}
 function fillBody(body, text, plain) {
   body.classList.toggle('plain', plain);
   body.classList.toggle('md', !plain);
@@ -478,6 +525,62 @@ $('rail-btn').addEventListener('click', () => setRail(!document.body.classList.c
   const saved = store('bs.rail');
   // 한 사이드바(#1740)는 옛 메뉴 + 목록(64+248)보다 좁다 — 1000–1279 도 펼친 채 시작(접으면 대화 목록이 숨으므로)
   setRail(saved === 'collapsed', false);
+}
+// ───── 사이드바 너비 조정(마스터 #2031): ≥1000 · 펼친 사이드바 오른쪽 손잡이(#nav-resize)를 끌거나 ←→(Shift 는 48px) · 두 번 누르면 기본 · bs.nav-w 에 기억 ─────
+{
+  const NAV_MIN = 200;
+  const NAV_MAX = 560;
+  const h = $('nav-resize');
+  const clamp = (w) => Math.round(Math.max(NAV_MIN, Math.min(w, NAV_MAX, Math.max(NAV_MIN, window.innerWidth - 480)))); // 대화 칸은 480px 넘게 남긴다
+  const setNavW = (w, remember) => {
+    if (w == null) {
+      document.body.classList.remove('nav-sized');
+      document.body.style.removeProperty('--nav-user-w');
+      if (remember) {
+        try { localStorage.removeItem('bs.nav-w'); } catch {}
+      }
+    } else {
+      w = clamp(w);
+      document.body.style.setProperty('--nav-user-w', `${w}px`);
+      document.body.classList.add('nav-sized');
+      if (remember) store('bs.nav-w', String(w));
+    }
+    h.setAttribute('aria-valuenow', String(Math.round($('nav').getBoundingClientRect().width)));
+  };
+  const saved = Number(store('bs.nav-w'));
+  if (saved > 0) setNavW(saved, false);
+  h.setAttribute('aria-valuemin', String(NAV_MIN));
+  h.setAttribute('aria-valuemax', String(NAV_MAX));
+  h.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    h.setPointerCapture(e.pointerId);
+    const left = $('nav').getBoundingClientRect().left;
+    document.body.classList.add('nav-resizing');
+    const move = (ev) => setNavW(ev.clientX - left, false);
+    const up = (ev) => {
+      h.removeEventListener('pointermove', move);
+      h.removeEventListener('pointerup', up);
+      h.removeEventListener('pointercancel', up);
+      document.body.classList.remove('nav-resizing');
+      setNavW(ev.clientX - left, true);
+      syncToBottom();
+    };
+    h.addEventListener('pointermove', move);
+    h.addEventListener('pointerup', up);
+    h.addEventListener('pointercancel', up);
+  });
+  h.addEventListener('dblclick', () => {
+    setNavW(null, true);
+    syncToBottom();
+  });
+  h.addEventListener('keydown', (e) => {
+    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+    e.preventDefault();
+    const step = (e.shiftKey ? 48 : 16) * (e.key === 'ArrowLeft' ? -1 : 1);
+    setNavW($('nav').getBoundingClientRect().width + step, true);
+    syncToBottom();
+  });
 }
 function syncMenu() {
   // 실행 화면이면 «실행 상태». 대화 작업 중에는 보조 패널의 세션·참여자 탭을 따른다(실행 탭은 대화 작업의 일부)
@@ -1200,6 +1303,69 @@ function insertMsg(m) {
   }
   return true;
 }
+// ───── 원문 → 답 묶어 보이기(마스터 #2039) ─────
+// 지시를 잇달아 보내도 «원문1 > 원문1의 답 > 원문2 > 원문2의 답»으로 보이게, 에이전트 글이 이 화면에 있는 글에 답장(reply_to_seq)이면
+// 그 글 묶음 끝으로 옮겨 그린다. 사람(마스터) 글은 늘 시간 순서 자리에 둔다 — 대화 흐름의 뼈대. 저장 순서·번호는 그대로이고 화면 순서만 바꾼다.
+/** 화면에 그릴 순서 — list 는 seq 순 */
+function displayOrder(list) {
+  const bySeq = new Map(list.map((m) => [m.seq, m]));
+  const kids = new Map();
+  const roots = [];
+  for (const m of list) {
+    const p = m.reply_to_seq != null && m.reply_to_seq < m.seq && isAgent(m.author_id) ? bySeq.get(m.reply_to_seq) : null;
+    if (p) {
+      if (!kids.has(p.seq)) kids.set(p.seq, []);
+      kids.get(p.seq).push(m);
+    } else roots.push(m);
+  }
+  const out = [];
+  const walk = (m) => {
+    out.push(m);
+    for (const k of kids.get(m.seq) ?? []) walk(k);
+  };
+  for (const r of roots) walk(r);
+  return out;
+}
+/** DOM 의 글 순서를 displayOrder 에 맞춘다(이미 맞는 글은 안 건드림) · 끝이 아닌 자리에 들어간 새 글 seq 들을 돌려준다 */
+function arrangeMsgs(fresh) {
+  const box = $('messages');
+  const nextMsg = (n) => {
+    let x = n?.nextElementSibling ?? null;
+    while (x && !x.classList.contains('msg')) x = x.nextElementSibling;
+    return x;
+  };
+  let at = box.querySelector(':scope > .msg');
+  const order = displayOrder(S.messages);
+  for (const m of order) {
+    const n = document.getElementById(`m${m.seq}`);
+    if (!n || n.parentNode !== box) continue;
+    if (n === at) at = nextMsg(at);
+    else box.insertBefore(n, at);
+  }
+  if (!fresh?.size) return [];
+  const tail = order.at(-1)?.seq;
+  return order.filter((m) => fresh.has(m.seq) && m.seq !== tail && m.reply_to_seq != null && isAgent(m.author_id) && order.indexOf(m) < order.length - 1).map((m) => m.seq);
+}
+/** 위쪽 묶음에 들어간 새 답 알림 — 누르면 그 글로 간다(바닥에 있는 사람은 위에 들어온 답을 못 보므로) */
+function notePlaced(seqs) {
+  let b = $('placed-note');
+  if (!seqs.length) return;
+  const seq = seqs.at(-1);
+  const m = S.messages.find((x) => x.seq === seq);
+  if (!b) {
+    b = el('button', { type: 'button', id: 'placed-note', class: 'placed-note' });
+    b.addEventListener('click', () => {
+      b.hidden = true;
+      if (b.dataset.seq) goSeq(Number(b.dataset.seq));
+    });
+    $('to-bottom').before(b);
+  }
+  b.dataset.seq = String(seq);
+  b.textContent = t('app.placed_note', { seq, to: m?.reply_to_seq ?? '' });
+  b.hidden = false;
+  clearTimeout(b._t);
+  b._t = setTimeout(() => (b.hidden = true), 20000);
+}
 function syncEmpty() {
   const empty = S.messages.length === 0 && !!S.detail;
   $('empty-thread').hidden = !empty;
@@ -1252,6 +1418,7 @@ function loadOlder(limit = PAGE) {
     const bar = $('older-bar');
     if (bar) bar.after(...nodes);
     else sc.prepend(...nodes);
+    arrangeMsgs();
     renderRunLines();
     if (anchor) sc.scrollTop += anchor.e.getBoundingClientRect().top - sc.getBoundingClientRect().top - anchor.off;
     return fresh.length;
@@ -1313,6 +1480,7 @@ async function fetchNew(onPage) {
   const th = S.cur;
   fetchingThread = th;
   let added = 0;
+  const before = new Set(S.seen);
   fetching = (async () => {
     for (;;) {
       // 처음 읽기(아무것도 안 그린 대화)는 맨 끝 PAGE 개만 — 옛 글은 위로 굴리면 loadOlder 가 받는다(마스터 #1732)
@@ -1341,12 +1509,14 @@ async function fetchNew(onPage) {
   await fetching;
   if (th !== S.cur) return added;
   if (clearSeenAwait()) renderList();
+  const placed = added ? arrangeMsgs(new Set(before.size ? [...S.seen].filter((q) => !before.has(q)) : [])) : [];
   settleOutbox();
   syncEmpty();
   renderRunLines();
   if (S.detail) renderHead();
   if (added && faceActive()) renderFace();
   if (atBottom || added) scrollBottom();
+  if (placed.length) notePlaced(placed);
   if (S.auxOpen && S.tab === 'people') renderPeopleTab();
   return added;
 }
@@ -1386,6 +1556,44 @@ $('to-bottom').addEventListener('click', () => {
 });
 for (const id of ['messages', 'tag-page']) $(id).addEventListener('scroll', syncToBottom, { passive: true });
 window.addEventListener('resize', syncToBottom);
+// ───── 폰 키보드 · 폴드 화면 전환(마스터 #2025·#2027) ─────
+// 키보드: viewport 의 interactive-widget=resizes-content 가 앱 높이를 줄이게 하고, 그 값을 무시하는 브라우저는 실제로 보이는 높이(visualViewport)를
+// 앱 높이로 넣고 페이지가 밀렸으면 맨 위로 되돌린다(상단 바가 화면 밖으로 밀려 올라가던 것). 사용자가 손으로 확대한 동안은 손대지 않는다.
+// 폴드: 바깥 화면(약 400px)에서 펼치면 그때의 확대 배율이 남아 화면이 커진 채 잘렸다 — 폭이 크게 바뀌었는데 배율이 1이 아니면 viewport 를 다시 써 1로 돌린다.
+{
+  const vv = window.visualViewport;
+  const meta = document.querySelector('meta[name="viewport"]');
+  const root = document.documentElement;
+  let lastW = root.clientWidth;
+  const fit = () => {
+    if (!vv) return;
+    const zoomed = Math.abs((vv.scale || 1) - 1) > 0.01;
+    const h = zoomed ? '' : `${Math.round(vv.height)}px`;
+    if (root.style.height !== h) {
+      root.style.height = h;
+      document.body.style.height = h;
+    }
+    if (!zoomed && (window.scrollY || root.scrollTop || document.body.scrollTop)) window.scrollTo(0, 0);
+  };
+  const unzoom = () => {
+    const w = root.clientWidth;
+    const jump = lastW && Math.abs(w - lastW) / lastW > 0.25;
+    lastW = w;
+    if (!jump || !meta || !vv || Math.abs((vv.scale || 1) - 1) <= 0.01) return;
+    const c = meta.getAttribute('content') ?? '';
+    meta.setAttribute('content', `${c}, maximum-scale=1`);
+    setTimeout(() => meta.setAttribute('content', c), 300); // 손 확대는 다시 된다
+  };
+  if (vv) {
+    vv.addEventListener('resize', fit);
+    vv.addEventListener('scroll', fit);
+  }
+  window.addEventListener('resize', () => {
+    unzoom();
+    fit();
+  });
+  fit();
+}
 // 새 글이 붙거나 목록이 다시 그려지면 바닥까지 거리가 바뀐다 — 스크롤 없이도 다시 잰다
 {
   let q = 0;
@@ -1436,6 +1644,7 @@ function msgEl(m, inherited) {
   body._src = m.body;
   if (m.merge) body.append(mergeBox(m));
   else fillBody(body, m.body, isPlain(S.cur));
+  if (!inherited) wireSteps(body, m);
   const qMini = inherited ? null : questionMini(m);
   const list = m.attachments ?? [];
   const imgs = list.filter((a) => a.kind === 'image');
@@ -3776,7 +3985,7 @@ function tagSuggest(ta) {
       ...st.opts.map((o, i) => {
         const sel = i === st.i;
         const row = o.tag
-          ? el('div', { class: `opt${sel ? ' sel' : ''}`, role: 'option', id: `tgs-${i}`, 'aria-selected': String(sel) }, el('span', {}, `#${o.tag.name}`), el('span', { class: 'faint' }, t(`app.tag_band_${tagBand(o.tag)}`)))
+          ? el('div', { class: `opt${sel ? ' sel' : ''}`, role: 'option', id: `tgs-${i}`, 'aria-selected': String(sel) }, el('span', {}, `#${o.tag.name}`), el('span', { class: `faint tg-kind${o.tag.kind === 'meta' ? ' meta' : ''}` }, t(o.tag.kind === 'meta' ? 'app.tag_kind_meta' : 'app.tag_kind_topic')))
           : o.create
             ? el('div', { class: `opt${sel ? ' sel' : ''}`, role: 'option', id: `tgs-${i}`, 'aria-selected': String(sel) }, el('span', {}, t('app.tag_suggest_create', { name: o.create })))
             : el('div', { class: 'opt empty faint' }, o.empty);
@@ -3906,21 +4115,26 @@ function renderTagPick() {
   const lock = pin
     ? el('button', { type: 'button', class: 'chip tag-pick-chip on locked', disabled: true, 'aria-pressed': 'true', 'data-tag': pin.name, title: t('app.tag_pinned_lock') }, `🔒 #${pin.name}`)
     : null;
+  // 두 줄(마스터 #2029): 위 줄 주제 태그 · 아래 줄 메타 태그 — 줄마다 가로로 민다
+  const chip = (tg) => {
+    const b = el('button', { type: 'button', class: `chip tag-pick-chip${on.has(tg.name) ? ' on' : ''}${tg.kind === 'meta' ? ' meta' : ''}`, 'aria-pressed': String(on.has(tg.name)), 'data-tag': tg.name, title: tagRecipientLine(tg) }, `#${tg.name}`);
+    b.addEventListener('mousedown', (e) => e.preventDefault());
+    b.addEventListener('click', () => {
+      const ta = $('body');
+      ta.value = toggleHeadTag(ta.value, tg.name);
+      ta.dispatchEvent(new Event('input', { bubbles: true }));
+      ta.focus();
+      ta.setSelectionRange(ta.value.length, ta.value.length);
+    });
+    return b;
+  };
+  const rest = live.filter((tg) => tg.id !== pin?.id);
+  const topics = rest.filter((tg) => tg.kind !== 'meta');
+  const metas = rest.filter((tg) => tg.kind === 'meta');
+  const row = (kind, lead, tags) => el('div', { class: `tag-pick-row ${kind}`, 'data-kind': kind }, el('span', { class: 'lbl' }, t(`app.tag_kind_${kind}`)), ...lead, ...tags.map(chip));
   box.replaceChildren(
-    el('span', { class: 'lbl' }, t('app.tag_pick')),
-    ...(lock ? [lock] : []),
-    ...live.filter((tg) => tg.id !== pin?.id).map((tg) => {
-      const b = el('button', { type: 'button', class: `chip tag-pick-chip${on.has(tg.name) ? ' on' : ''}${tg.kind === 'meta' ? ' meta' : ''}`, 'aria-pressed': String(on.has(tg.name)), 'data-tag': tg.name, title: tagRecipientLine(tg) }, `#${tg.name}`);
-      b.addEventListener('mousedown', (e) => e.preventDefault());
-      b.addEventListener('click', () => {
-        const ta = $('body');
-        ta.value = toggleHeadTag(ta.value, tg.name);
-        ta.dispatchEvent(new Event('input', { bubbles: true }));
-        ta.focus();
-        ta.setSelectionRange(ta.value.length, ta.value.length);
-      });
-      return b;
-    }),
+    ...(topics.length || lock ? [row('topic', lock ? [lock] : [], topics)] : []),
+    ...(metas.length ? [row('meta', [], metas)] : []),
   );
 }
 $('body').addEventListener('input', renderTagPick);

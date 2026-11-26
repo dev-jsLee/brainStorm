@@ -614,6 +614,35 @@ w.location.hash = 'agents';
 await until(() => !$('agents-page').hidden && agCard('beta')?.textContent.includes('멤버 아님'), 5000, 'beta not room member');
 ok(true, '연결 화면 BETA «메인 채팅방: 멤버 아님(방에서 빠짐)» — 운영의 oc-main 꼴');
 
+// 멤버별 보기(마스터 #2030): BETA 하나 → 대화마다 권한 · 거르기 · 보이는 대화 모두 빼기
+w.location.hash = 'members';
+await until(() => !$('members-page').hidden, 5000, 'members again');
+$('mb-by-agent').click();
+await until(() => w.__S.mbBy === 'agent' && !$('mb-agent-l').hidden && !!w.document.querySelector('#mb-table tr.mb-row[data-tid]'), 5000, 'by agent');
+$('mb-agent').value = 'beta';
+$('mb-agent').dispatchEvent(new w.Event('change'));
+await until(() => $('mb-table').dataset.agent === 'beta' && !!w.document.querySelector(`#mb-table tr[data-tid="${roomId}"]`), 5000, 'beta rows');
+ok($('mb-thread-l').hidden && $('mb-by-agent').getAttribute('aria-pressed') === 'true', '«멤버별» 누르면 대화 고르개 대신 멤버 고르개');
+ok($$('#mb-table th').map((t) => t.textContent).join('|') === '대화|멤버|읽기|게시', '멤버별 표 머리: 대화 · 멤버 · 읽기 · 게시');
+const maBox = (tid, k) => w.document.querySelector(`#mb-table tr[data-tid="${tid}"] input[data-k="${k}"]`);
+ok(!maBox(roomId, 'member').checked && maBox(roomId, 'read').disabled, '방에서 뺀 BETA — 메인 채팅방 줄 멤버 아님');
+maBox(roomId, 'member').checked = true;
+maBox(roomId, 'member').dispatchEvent(new w.Event('change'));
+await until(() => maBox(roomId, 'post')?.checked && !maBox(roomId, 'post').disabled, 4000, 'beta back');
+ok((await M('GET', `/api/threads/${roomId}`)).members.some((m) => m.participant_id === 'beta'), '멤버별 화면에서 넣기 → 서버에도 방 멤버');
+const roomTitle = w.__S.threads.find((t) => t.id === roomId).title;
+$('mb-filter').value = roomTitle;
+$('mb-filter').dispatchEvent(new w.Event('input'));
+await until(() => $$('#mb-table tr.mb-row').length >= 1 && $$('#mb-table tr.mb-row').every((r) => r.textContent.includes(roomTitle)), 4000, 'filtered');
+$$('#mb-table .mb-bulk button').find((b) => b.textContent === '모두 빼기').click();
+await until(() => !$('confirm').hidden);
+$('confirm-ok').click();
+await until(() => $('mb-status').textContent.includes('적용했습니다'), 5000, 'bulk done');
+ok(!(await M('GET', `/api/threads/${roomId}`)).members.some((m) => m.participant_id === 'beta'), '거른 대화 «모두 빼기» → 서버에서도 빠짐');
+$('mb-by-thread').click();
+await until(() => w.__S.mbBy === 'thread' && !$('mb-thread-l').hidden && !!w.document.querySelector('#mb-table tr.mb-row[data-pid="beta"]'), 5000, 'back to by thread');
+ok(true, '«대화별»로 돌아감');
+
 // 감사 기록(n76)
 for (let i = 0; i < 30; i++) await M('POST', `/api/threads/${roomId}/members`, { participant_id: 'alpha', can_read: true, can_post: i % 2 === 0 });
 w.document.querySelector('.menu-item[data-menu="audit"]').click();

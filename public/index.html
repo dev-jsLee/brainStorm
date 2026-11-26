@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
   <meta name="theme-color" content="#f3f2f2" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#1b1a18" media="(prefers-color-scheme: dark)">
   <title>brainStorm</title>
@@ -108,6 +108,7 @@
     </aside>
     <div id="nav-foot"></div>
     </div>
+    <div id="nav-resize" role="separator" aria-orientation="vertical" tabindex="0" aria-label="사이드바 너비 조정" title="끌어서 사이드바 너비 조정 · 두 번 누르면 기본 너비" data-i18n-attr="aria-label:html.side.resize;title:html.side.resizeTitle"></div>
 
     <section id="convo" aria-label="대화" data-i18n-attr="aria-label:html.convo.label">
       <div id="empty" class="muted pad" data-i18n="html.convo.loading">대화를 불러오는 중…</div>
@@ -367,9 +368,15 @@
       <div class="page-head">
         <h2 id="mb-h" tabindex="-1" data-i18n="html.menu.members">멤버 권한</h2>
         <span class="spacer"></span>
-        <label class="small"><span data-i18n="html.common.conversation">대화</span> <select id="mb-thread"></select></label>
+        <div class="q-tabs" role="group" aria-label="보기" data-i18n-attr="aria-label:html.q.view">
+          <button type="button" id="mb-by-thread" aria-pressed="true" data-i18n="html.members.byThread">대화별</button>
+          <button type="button" id="mb-by-agent" aria-pressed="false" data-i18n="html.members.byAgent">멤버별</button>
+        </div>
+        <label class="small" id="mb-thread-l"><span data-i18n="html.common.conversation">대화</span> <select id="mb-thread"></select></label>
+        <label class="small" id="mb-agent-l" hidden><span data-i18n="html.members.member">멤버</span> <select id="mb-agent"></select></label>
       </div>
       <p class="muted small" data-i18n="html.members.note">대화마다 에이전트의 읽기·게시 권한을 정합니다. 바꾸면 바로 적용되고 감사 기록에 남습니다. 에이전트는 호출 권한이 없습니다(에이전트 간 자동 호출 꺼짐). 읽기를 끄면 그 에이전트 앞 전달은 거둬지고, 게시는 읽기가 있어야 켤 수 있습니다.</p>
+      <p id="mb-agent-note" class="muted small" data-i18n="html.members.agentNote" hidden>한 멤버의 권한을 대화마다 한 화면에서 정합니다. 위 칸으로 대화를 걸러 «보이는 대화 모두»에 한 번에 적용할 수 있습니다.</p>
       <div id="mb-table"></div>
       <p id="mb-status" class="small" role="status" aria-live="polite"></p>
     </section>

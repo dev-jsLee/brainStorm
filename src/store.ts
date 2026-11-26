@@ -1319,6 +1319,24 @@ export class Store {
     }
   }
 
+  /** 멤버별 보기(마스터 #2030): 한 참여자가 대화마다 가진 권한 — 지워지지 않은 대화 전부, 멤버가 아니면 member:false */
+  listMemberships(pr: Principal, participantId: string) {
+    this.requireMaster(pr, 'member.view', { target_type: 'participant', target_id: participantId.slice(0, 64) });
+    const p = this.getParticipant(participantId);
+    if (!p) throw new ApiError(404, 'not_found');
+    const rows = this.db
+      .prepare(
+        `SELECT t.id AS thread_id, tm.can_read, tm.can_post, tm.participant_id AS pid
+         FROM threads t LEFT JOIN thread_members tm ON tm.thread_id = t.id AND tm.participant_id = ?
+         WHERE t.deleted_at IS NULL ORDER BY t.kind = 'room' DESC, t.created_at`,
+      )
+      .all(p.id) as Row[];
+    return {
+      participant_id: p.id,
+      memberships: rows.map((r) => (r.pid ? { thread_id: r.thread_id as string, member: true, can_read: !!r.can_read, can_post: !!r.can_post } : { thread_id: r.thread_id as string, member: false })),
+    };
+  }
+
   setMember(pr: Principal, threadId: string, input: { participant_id?: unknown; can_read?: unknown; can_post?: unknown; remove?: unknown }) {
     this.requireMaster(pr, 'member.set', { target_type: 'thread', target_id: threadId, thread_id: threadId });
     this.requireThread(threadId);

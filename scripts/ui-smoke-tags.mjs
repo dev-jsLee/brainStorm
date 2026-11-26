@@ -197,6 +197,7 @@ ok($('tag-list').querySelector('details summary')?.textContent === '보관 1', '
   const chip = (n) => pick.querySelector(`[data-tag="${n}"]`);
   ok(!pick.hidden && !!chip('전력') && pick.nextElementSibling?.id === 'recipients', '수신 대상 위에 태그 칩 줄');
   ok(!chip('인프라'), '보관 태그는 칩에 없음');
+  ok(!!pick.querySelector('.tag-pick-row.topic [data-tag="전력"]') && !pick.querySelector('.tag-pick-row.meta [data-tag="전력"]'), '주제 태그는 위 줄(주제)에 — 메타 줄과 나뉨 (#2029)');
   ta.value = '전력 얘기';
   ta.dispatchEvent(new w.Event('input', { bubbles: true }));
   chip('전력').click();

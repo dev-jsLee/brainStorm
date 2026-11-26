@@ -295,6 +295,7 @@ export async function buildApp(cfg: Config, opts: { logger?: boolean; registry?:
     return reply.code(r.duplicate ? 200 : 201).send(r);
   });
   fastify.get<P>('/api/threads/:id', { preHandler: auth }, async (req) => store.getThread(req.principal!, req.params.id));
+  fastify.get<{ Params: { id: string } }>('/api/participants/:id/memberships', { preHandler: auth }, async (req) => store.listMemberships(req.principal!, req.params.id));
   fastify.post<P>('/api/threads/:id/members', { preHandler: auth }, async (req) =>
     store.setMember(req.principal!, req.params.id, (req.body ?? {}) as any),
   );

@@ -279,7 +279,8 @@ export class FaceStore {
     let halted: Row | undefined;
     let runs: string[] = [];
     this.s.db.transaction(() => {
-      this.s.db.prepare('UPDATE threads SET mode = ?, updated_at = ? WHERE id = ?').run(mode, t, threadId);
+      // 모드만 바꾼다 — updated_at 은 안 건드림(마스터 #2025: 켜기만 해도 목록 맨 위로 올라갔다)
+      this.s.db.prepare('UPDATE threads SET mode = ? WHERE id = ?').run(mode, threadId);
       if (mode === 'chat') {
         const r = this.faceLatest(threadId);
         if (r && (r.state === 'running' || r.state === 'question')) {
